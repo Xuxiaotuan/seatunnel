@@ -28,8 +28,6 @@
     <packaging>pom</packaging>
     <name>SeaTunnel : Examples : Flink :</name>
     <modules>
-        <module>seatunnel-flink-13-example</module>
-        <module>seatunnel-flink-15-example</module>
         <module>seatunnel-flink-20-example</module>
     </modules>
 

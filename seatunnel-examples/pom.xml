@@ -32,7 +32,6 @@
 
     <modules>
         <module>seatunnel-spark-connector-v2-example</module>
-        <module>seatunnel-engine-examples</module>
         <module>seatunnel-flink-examples</module>
     </modules>
 

@@ -30,75 +30,43 @@
     <name>SeaTunnel : Examples : Spark Connector V2</name>
 
     <properties>
-        <spark.scope>compile</spark.scope>
-        <spark.2.4.0.jackson.version>2.6.7</spark.2.4.0.jackson.version>
+        <encoding>UTF-8</encoding>
+
+        <spark.3.3.0.version>3.3.3</spark.3.3.0.version>
+        <scala.binary.version>2.12</scala.binary.version>
+        <scala.version>2.12.15</scala.version>
+        <mysql.version>8.0.27</mysql.version>
+
+        <!-- 将 Jackson 版本从 2.14.0 改为 2.13.3 -->
+        <jackson.version>2.13.3</jackson.version>
+        <mysql.version>8.0.27</mysql.version>
     </properties>
+
     <dependencies>
+        <!-- Scala 2.12.x -->
         <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>${spark.2.4.0.jackson.version}</version>
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-library</artifactId>
+            <version>${scala.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-reflect</artifactId>
+            <version>${scala.version}</version>
         </dependency>
 
-        <dependency>
-            <groupId>org.apache.seatunnel</groupId>
-            <artifactId>seatunnel-spark-2-starter</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <!--   seatunnel-transforms-v2   -->
-        <dependency>
-            <groupId>org.apache.seatunnel</groupId>
-            <artifactId>seatunnel-transforms-v2</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <!--   seatunnel-transforms-v2   -->
-
-        <!--   seatunnel connectors   -->
-        <dependency>
-            <groupId>org.apache.seatunnel</groupId>
-            <artifactId>connector-fake</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.seatunnel</groupId>
-            <artifactId>connector-console</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <!--   seatunnel connectors   -->
-
+        <!-- Spark 3.3.3 -->
         <!--spark-->
         <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-streaming_${scala.binary.version}</artifactId>
-            <version>${spark.2.4.0.version}</version>
-            <scope>${spark.scope}</scope>
+            <version>${spark.3.3.0.version}</version>
         </dependency>
 
         <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-core_${scala.binary.version}</artifactId>
-            <version>${spark.2.4.0.version}</version>
-            <scope>${spark.scope}</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>com.thoughtworks.paranamer</groupId>
-                    <artifactId>paranamer</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>io.netty</groupId>
-                    <artifactId>netty</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>io.netty</groupId>
-                    <artifactId>netty-all</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>io.netty</groupId>
-            <artifactId>netty-all</artifactId>
-            <version>4.1.104.Final</version>
+            <version>${spark.3.3.0.version}</version>
         </dependency>
         <dependency>
             <groupId>com.thoughtworks.paranamer</groupId>
@@ -109,14 +77,65 @@
         <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-sql_${scala.binary.version}</artifactId>
-            <version>${spark.2.4.0.version}</version>
-            <scope>${spark.scope}</scope>
+            <version>${spark.3.3.0.version}</version>
+        </dependency>
+
+        <!-- SeaTunnel Spark3 Starter -->
+        <dependency>
+            <groupId>org.apache.seatunnel</groupId>
+            <artifactId>seatunnel-spark-3-starter</artifactId>
+            <version>${project.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.seatunnel</groupId>
+                    <artifactId>seatunnel-scala-compiler</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.scala-lang</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- SeaTunnel transforms -->
+        <dependency>
+            <groupId>org.apache.seatunnel</groupId>
+            <artifactId>seatunnel-transforms-v2</artifactId>
+            <version>${project.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.seatunnel</groupId>
+                    <artifactId>seatunnel-scala-compiler</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.scala-lang</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- SeaTunnel connectors -->
+        <dependency>
+            <groupId>org.apache.seatunnel</groupId>
+            <artifactId>connector-fake</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.seatunnel</groupId>
+            <artifactId>connector-console</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Jackson -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
         </dependency>
 
         <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-hive_${scala.binary.version}</artifactId>
-            <version>${spark.2.4.0.version}</version>
+            <version>${spark.3.3.0.version}</version>
             <scope>${spark.scope}</scope>
             <exclusions>
                 <exclusion>
@@ -127,10 +146,79 @@
         </dependency>
 
         <dependency>
+            <groupId>org.apache.seatunnel</groupId>
+            <artifactId>connector-file-ftp</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.seatunnel</groupId>
+            <artifactId>connector-file-s3</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.seatunnel</groupId>
+            <artifactId>connector-file-local</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.seatunnel</groupId>
+            <artifactId>connector-http-base</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>commons-net</groupId>
+            <artifactId>commons-net</artifactId>
+            <version>3.9.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.seatunnel</groupId>
+            <artifactId>connector-jdbc</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>mysql</groupId>
+            <artifactId>mysql-connector-java</artifactId>
+            <version>${mysql.version}</version>
+
+        </dependency>
+        <!-- lz4 压缩 -->
+        <dependency>
             <groupId>net.jpountz.lz4</groupId>
             <artifactId>lz4</artifactId>
             <version>1.3.0</version>
         </dependency>
+
     </dependencies>
 
+    <build>
+        <plugins>
+            <!-- 保证不混入 Scala 2.13 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.4.1</version>
+                <executions>
+                    <execution>
+                        <id>enforce-scala</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>org.scala-lang:scala-library:[2.13,)</exclude>
+                                        <exclude>org.scala-lang:scala-reflect:[2.13,)</exclude>
+                                        <exclude>org.scala-lang:scala-compiler:[2.13,)</exclude>
+                                        <exclude>org.apache.seatunnel:seatunnel-scala-compiler</exclude>
+                                    </excludes>
+                                </bannedDependencies>
+                            </rules>
+                            <fail>true</fail>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>
