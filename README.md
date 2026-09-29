@@ -64,6 +64,52 @@ We appreciate all developers for their contributions. See the [List Of Contribut
 ## How to Compile
 Refer to this [Setup](https://seatunnel.apache.org/docs/developer/setup) for compilation instructions.
 
+## Local Flink 1.20.5 Python Transform Smoke Test
+
+This branch contains a local verification case for the Python transform plugin on Flink 1.20.5. The job has two `FakeSource` inputs and one PostgreSQL JDBC input, three row-level Python transforms, and two `Console` sinks plus one PostgreSQL JDBC sink. The transform normalizes `name`, adds one to `age`, and propagates a value from `context["config"]`.
+
+The example files are:
+
+- [`python_transform_multi_source_multi_sink.conf`](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform_multi_source_multi_sink.conf)
+- [`python_transform.py`](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform.py)
+
+Build the relevant modules with the local Flink version:
+
+```bash
+./mvnw -pl \
+  seatunnel-connectors-v2/connector-fake,\
+  seatunnel-connectors-v2/connector-console,\
+  seatunnel-connectors-v2/connector-jdbc,\
+  seatunnel-translation/seatunnel-translation-flink/seatunnel-translation-flink-20,\
+  seatunnel-core/seatunnel-flink-starter/seatunnel-flink-20-starter,\
+  seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example \
+  -am -Dflink.1.20.1.version=1.20.5 -DskipTests package
+```
+
+Set the Python execution policy for the local Flink runtime and make the PostgreSQL connection values available as `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USER`, and `PG_PASSWORD`. Copy `python_transform.py` to the path used by `source_code_path` before submitting the job:
+
+```bash
+cp seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform.py \
+  /tmp/seatunnel-python-transform.py
+
+export FLINK_HOME=/Users/xujiawei/software/flink/flink-1.20.5
+export SEATUNNEL_HOME=/path/to/seatunnel-runtime
+export FLINK_CONF_DIR=$SEATUNNEL_HOME/flink-conf
+```
+
+The runtime directory must contain the Flink 1.20 starter under `starter/`, the `Fake`, `Console`, and `Jdbc` connector jars plus `seatunnel-transforms-v2.jar` under `connectors/`, the Flink 1.20 translation jar under `lib/`, and the PostgreSQL JDBC driver. Submit the job with:
+
+```bash
+$SEATUNNEL_HOME/bin/start-seatunnel-flink-20-connector-v2.sh \
+  --master local --deploy-mode run \
+  -c $SEATUNNEL_HOME/config/python_transform_multi_source_multi_sink.conf \
+  --name PythonTransformSmoke
+```
+
+The local verification completed with Flink 1.20.5 and six input rows. PostgreSQL returned the transformed rows `301,Eve,28,eve,29,postgres` and `302,Frank,35,frank,36,postgres`. The branch also ran 24 Python transform unit tests successfully.
+
+The current JDBC sink implementation derives the generated sink table from the JDBC source physical table when `generate_sink_sql = true`; this smoke test therefore writes the transformed columns back to the dedicated `seatunnel_python_input` test table. Use a separate test table or adapt the sink table resolution before using this example against business data.
+
 ## Contact Us
 - Mail list: **dev@seatunnel.apache.org**. Subscribe by sending an email to `dev-subscribe@seatunnel.apache.org`.
 - Slack: [Join SeaTunnel Slack](https://s.apache.org/seatunnel-slack)
