@@ -82,9 +82,15 @@ public class FlinkExecution implements TaskExecution {
     private final PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
             sinkPluginExecuteProcessor;
     private final List<URL> jarPaths;
+    private final List<? extends Config> sourceConfigs;
+    private final List<? extends Config> sinkConfigs;
+    private final JobLifecycleExecutor jobLifecycleExecutor;
 
     public FlinkExecution(Config config) {
         try {
+            this.sourceConfigs = config.getConfigList(Constants.SOURCE);
+            this.sinkConfigs = config.getConfigList(Constants.SINK);
+            this.jobLifecycleExecutor = new JobLifecycleExecutor(config);
             jarPaths =
                     new ArrayList<>(
                             Collections.singletonList(
@@ -104,8 +110,7 @@ public class FlinkExecution implements TaskExecution {
         jobContext.setEnableCheckpoint(RuntimeEnvironment.getEnableCheckpoint(config));
 
         this.sourcePluginExecuteProcessor =
-                new SourceExecuteProcessor(
-                        jarPaths, envConfig, config.getConfigList(Constants.SOURCE), jobContext);
+                new SourceExecuteProcessor(jarPaths, envConfig, sourceConfigs, jobContext);
         this.transformPluginExecuteProcessor =
                 new TransformExecuteProcessor(
                         jarPaths,
@@ -114,8 +119,7 @@ public class FlinkExecution implements TaskExecution {
                                 config, Constants.TRANSFORM, Collections.emptyList()),
                         jobContext);
         this.sinkPluginExecuteProcessor =
-                new SinkExecuteProcessor(
-                        jarPaths, envConfig, config.getConfigList(Constants.SINK), jobContext);
+                new SinkExecuteProcessor(jarPaths, envConfig, sinkConfigs, jobContext);
 
         this.flinkRuntimeEnvironment =
                 FlinkRuntimeEnvironment.getInstance(
@@ -128,6 +132,7 @@ public class FlinkExecution implements TaskExecution {
 
     @Override
     public void execute() throws TaskExecuteException {
+        jobLifecycleExecutor.executePre(sourceConfigs, sinkConfigs);
         List<DataStreamTableInfo> dataStreams = new ArrayList<>();
         dataStreams = sourcePluginExecuteProcessor.execute(dataStreams);
         dataStreams = transformPluginExecuteProcessor.execute(dataStreams);
@@ -164,6 +169,7 @@ public class FlinkExecution implements TaskExecution {
                             .build();
 
             LOGGER.info("Job finished, execution result: \n{}", jobMetricsSummary);
+            jobLifecycleExecutor.executePost(sourceConfigs, sinkConfigs);
         } catch (Exception e) {
             throw new TaskExecuteException("Execute Flink job error", e);
         }
