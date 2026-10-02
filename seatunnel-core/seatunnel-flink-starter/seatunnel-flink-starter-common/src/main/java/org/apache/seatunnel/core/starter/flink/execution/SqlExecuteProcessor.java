@@ -65,11 +65,40 @@ import java.util.Map;
 public class SqlExecuteProcessor
         implements PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment> {
 
+    public static final String PRE_TRANSFORM = "pre_transform";
+    public static final String POST_TRANSFORM = "post_transform";
+
     private final Config sqlConfig;
+    private final String stageName;
     private FlinkRuntimeEnvironment runtimeEnvironment;
 
     public SqlExecuteProcessor(Config config) {
-        this.sqlConfig = config.hasPath("sql") ? config.getConfig("sql") : null;
+        this(config, PRE_TRANSFORM);
+    }
+
+    public SqlExecuteProcessor(Config config, String stageName) {
+        this.stageName = stageName;
+        this.sqlConfig = resolveStageConfig(config, stageName);
+    }
+
+    static Config resolveStageConfig(Config rootConfig, String stageName) {
+        if (!rootConfig.hasPath("sql")) {
+            return null;
+        }
+        Config sqlRoot = rootConfig.getConfig("sql");
+        if (sqlRoot.hasPath(stageName)) {
+            return sqlRoot.getConfig(stageName);
+        }
+        // Keep the original `sql { query = ... }` syntax as a pre-transform SQL stage.
+        if (PRE_TRANSFORM.equals(stageName)
+                && (sqlRoot.hasPath("query") || sqlRoot.hasPath("plugin_output"))) {
+            return sqlRoot;
+        }
+        return null;
+    }
+
+    boolean isConfigured() {
+        return sqlConfig != null;
     }
 
     @Override
@@ -105,7 +134,7 @@ public class SqlExecuteProcessor
             CatalogTable outputTable =
                     CatalogTableUtil.getCatalogTable(
                             "schema", "default", null, outputName, resultType);
-            log.info("Created Flink SQL output {} from query: {}", outputName, query);
+            log.info("Created Flink SQL {} output {} from query: {}", stageName, outputName, query);
             return Collections.singletonList(
                     new DataStreamTableInfo(
                             output, Collections.singletonList(outputTable), outputName));
@@ -222,7 +251,8 @@ public class SqlExecuteProcessor
 
     private String requiredString(String key) {
         if (!sqlConfig.hasPath(key) || sqlConfig.getString(key).trim().isEmpty()) {
-            throw new IllegalArgumentException("sql." + key + " must not be blank");
+            throw new IllegalArgumentException(
+                    "sql." + stageName + "." + key + " must not be blank");
         }
         return sqlConfig.getString(key);
     }

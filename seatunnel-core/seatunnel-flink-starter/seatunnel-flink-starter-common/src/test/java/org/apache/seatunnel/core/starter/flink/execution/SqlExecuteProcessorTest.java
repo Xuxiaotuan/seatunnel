@@ -17,6 +17,9 @@
 
 package org.apache.seatunnel.core.starter.flink.execution;
 
+import org.apache.seatunnel.shade.com.typesafe.config.Config;
+import org.apache.seatunnel.shade.com.typesafe.config.ConfigFactory;
+
 import org.apache.seatunnel.api.table.type.BasicType;
 import org.apache.seatunnel.api.table.type.DecimalType;
 import org.apache.seatunnel.api.table.type.RowKind;
@@ -30,6 +33,42 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class SqlExecuteProcessorTest {
+
+    @Test
+    void supportsExplicitPreAndPostTransformSqlStages() {
+        Config config =
+                ConfigFactory.parseString(
+                        "sql {\n"
+                                + " pre_transform {\n"
+                                + "  plugin_output = joined\n"
+                                + "  query = \"SELECT 1\"\n"
+                                + " }\n"
+                                + " post_transform {\n"
+                                + "  plugin_output = final\n"
+                                + "  query = \"SELECT 2\"\n"
+                                + " }\n"
+                                + "}\n");
+
+        Assertions.assertTrue(
+                new SqlExecuteProcessor(config, SqlExecuteProcessor.PRE_TRANSFORM).isConfigured());
+        Assertions.assertTrue(
+                new SqlExecuteProcessor(config, SqlExecuteProcessor.POST_TRANSFORM).isConfigured());
+    }
+
+    @Test
+    void keepsLegacySqlSyntaxAsPreTransformOnly() {
+        Config config =
+                ConfigFactory.parseString(
+                        "sql {\n"
+                                + " plugin_output = joined\n"
+                                + " query = \"SELECT 1\"\n"
+                                + "}\n");
+
+        Assertions.assertTrue(
+                new SqlExecuteProcessor(config, SqlExecuteProcessor.PRE_TRANSFORM).isConfigured());
+        Assertions.assertFalse(
+                new SqlExecuteProcessor(config, SqlExecuteProcessor.POST_TRANSFORM).isConfigured());
+    }
 
     @Test
     void mapsSeaTunnelTypesToFlinkTypes() {

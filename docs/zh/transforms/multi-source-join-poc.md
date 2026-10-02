@@ -9,9 +9,9 @@ sidebar_position: 17
 执行顺序是：
 
 ```text
-Source → Flink SQL → Python Transform → Sink
+Source → pre_transform SQL → Python Transform → post_transform SQL → Sink
 ```
 
-SQL 阶段复用同一个 `StreamExecutionEnvironment`，不会额外提交 Flink Job，也不改变现有单输入 `SeaTunnelTransform` 接口。配置示例位于 `seatunnel-flink-20-example` 的 `python_transform_two_source_inner_join.conf`。
+两个 SQL 阶段复用同一个 `StreamExecutionEnvironment`，不会额外提交 Flink Job，也不改变现有单输入 `SeaTunnelTransform` 接口。`pre_transform` 处理多 Source JOIN，`post_transform` 可以读取 Python 新增的字段并继续过滤或计算。配置示例位于 `seatunnel-flink-20-example` 的 `python_transform_two_source_inner_join.conf`。
 
-有限 FakeSource 使用 BATCH append-only 输入；STREAMING 模式使用 changelog 输入并保留 RowKind。运行验证得到两路 Source 共 4 行输入、SQL 后 2 行输出。当前 POC 尚未覆盖 PostgreSQL CDC、迟到数据、时间窗口、状态 TTL 和多级 Join 的恢复语义。
+有限 FakeSource 使用 BATCH append-only 输入；STREAMING 模式使用 changelog 输入并保留 RowKind。运行验证得到两路 Source 共 4 行输入、pre_transform SQL 后 2 行、post_transform SQL 过滤后 1 行。当前 POC 尚未覆盖 PostgreSQL CDC、迟到数据、时间窗口、状态 TTL 和多级 Join 的恢复语义。

@@ -154,17 +154,16 @@ SQL 试验位于当前分支，输入表数量由配置中的 SQL 自己决定�
 flowchart LR
     L["left_input\nFakeSource"] --> SQL["Flink SQL\nINNER JOIN on id"]
     R["right_input\nFakeSource"] --> SQL
-    SQL --> P["Python Transform\nper row"] --> C["Console Sink"]
+    SQL --> P["Python Transform\nper row"] --> SQL2["post_transform SQL\nfilter/project"] --> C["Console Sink"]
 ```
 
-配置示例：[python_transform_two_source_inner_join.conf](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform_two_source_inner_join.conf)。SQL 阶段复用 SeaTunnel 已创建的 `StreamExecutionEnvironment`，执行顺序为 `Source → SQL → Python Transform → Sink`，仍然只提交一个 Flink Job。后续增加第三路或更多输入时，只需要增加 Source 和 SQL 中的表引用。
+配置示例：[python_transform_two_source_inner_join.conf](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform_two_source_inner_join.conf)。SQL 阶段复用 SeaTunnel 已创建的 `StreamExecutionEnvironment`，执行顺序为 `Source → pre_transform SQL → Python Transform → post_transform SQL → Sink`，仍然只提交一个 Flink Job。后续增加第三路或更多输入时，只需要增加 Source 和 SQL 中的表引用。旧的顶层 `sql { query = ... }` 配置继续按 `pre_transform` 处理。
 
-本地 Flink 1.20.5 运行结果：Job exit code 为 `0`，JobID 为 `670d5ecb79faa23f1af4d5bf1d08a48f`，`SourceReceivedCount = 4`、`SinkWriteCount = 2`。两路 FakeSource 各发送两行，SQL 按 `id` 关联得到两行，再交给 Python Transform；Python 输出字段为 `normalized_name`、`age_plus_one`、`source_tag`。
+本地 Flink 1.20.5 运行结果：Job exit code 为 `0`，JobID 为 `dcf6c4eef8530dde60da224fc2737d0c`，`SourceReceivedCount = 4`、`SinkWriteCount = 1`。两路 FakeSource 各发送两行，pre_transform SQL 按 `id` 关联得到两行，再交给 Python Transform；post_transform SQL 读取 `age_plus_one` 并过滤出一行。Python 输出字段为 `normalized_name`、`age_plus_one`、`source_tag`。
 
-两行结果的确定性内容为：
+post_transform SQL 的确定性结果为：
 
 ```text
-301 | Eve   | 28 | Finance | 1 | eve   | 29 | joined
 302 | Frank | 35 | HR      | 2 | frank | 36 | joined
 ```
 

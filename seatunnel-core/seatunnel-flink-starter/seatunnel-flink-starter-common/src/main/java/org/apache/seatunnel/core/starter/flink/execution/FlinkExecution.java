@@ -80,7 +80,9 @@ public class FlinkExecution implements TaskExecution {
     private final PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
             transformPluginExecuteProcessor;
     private final PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
-            sqlExecuteProcessor;
+            preTransformSqlExecuteProcessor;
+    private final PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
+            postTransformSqlExecuteProcessor;
     private final PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
             sinkPluginExecuteProcessor;
     private final List<URL> jarPaths;
@@ -120,7 +122,10 @@ public class FlinkExecution implements TaskExecution {
                         TypesafeConfigUtils.getConfigList(
                                 config, Constants.TRANSFORM, Collections.emptyList()),
                         jobContext);
-        this.sqlExecuteProcessor = new SqlExecuteProcessor(config);
+        this.preTransformSqlExecuteProcessor =
+                new SqlExecuteProcessor(config, SqlExecuteProcessor.PRE_TRANSFORM);
+        this.postTransformSqlExecuteProcessor =
+                new SqlExecuteProcessor(config, SqlExecuteProcessor.POST_TRANSFORM);
         this.sinkPluginExecuteProcessor =
                 new SinkExecuteProcessor(jarPaths, envConfig, sinkConfigs, jobContext);
 
@@ -130,7 +135,8 @@ public class FlinkExecution implements TaskExecution {
 
         this.sourcePluginExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
         this.transformPluginExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
-        this.sqlExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
+        this.preTransformSqlExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
+        this.postTransformSqlExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
         this.sinkPluginExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
     }
 
@@ -139,8 +145,9 @@ public class FlinkExecution implements TaskExecution {
         jobLifecycleExecutor.executePre(sourceConfigs, sinkConfigs);
         List<DataStreamTableInfo> dataStreams = new ArrayList<>();
         dataStreams = sourcePluginExecuteProcessor.execute(dataStreams);
-        dataStreams = sqlExecuteProcessor.execute(dataStreams);
+        dataStreams = preTransformSqlExecuteProcessor.execute(dataStreams);
         dataStreams = transformPluginExecuteProcessor.execute(dataStreams);
+        dataStreams = postTransformSqlExecuteProcessor.execute(dataStreams);
         sinkPluginExecuteProcessor.execute(dataStreams);
         LOGGER.info(
                 "Flink Execution Plan: {}",
