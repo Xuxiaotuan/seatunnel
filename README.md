@@ -1,35 +1,96 @@
-# SeaTunnel Python Transform · Flink 1.20.5 验证案例
+# SeaTunnel Python Transform · Flink 1.20.5 验证分支
 
-这个分支只用于本地验证 SeaTunnel Python transform plugin。范围固定为 Flink 1.20.5、Fake、HTTP、Console、PostgreSQL JDBC 和 Python transform，覆盖多 Source、多 Sink，以及每一行数据经过 Python transform 的场景。
+这个分支用于在本地验证 SeaTunnel Python transform plugin，以及在一个 Flink 1.20.5 Job 中组合多 Source、多 Sink、SQL JOIN、Python transform 和 Source/Sink 前后置动作。
 
-分支：`codex/flink-multi-source-join-workbench`
+当前分支：`codex/flink-multi-source-join-workbench`
 
-## 流程
+本次只编译和验证以下连接器：Fake、HTTP、Console、PostgreSQL JDBC。其他连接器不在本分支的验证范围内。
+
+## 验证目标
+
+这里包含两个相互独立的案例：
+
+| 案例 | Source / Transform / Sink | 目的 |
+| --- | --- | --- |
+| 多 Source、多 Sink 生命周期案例 | Fake、HTTP、PostgreSQL JDBC → Python transform → Console、PostgreSQL JDBC | 验证每行数据经过 Python 处理，以及 JDBC source/sink 的 `pre`、`post` 动作 |
+| 多 Source SQL JOIN 案例 | 两路 FakeSource → `pre_transform` SQL `INNER JOIN` → Python transform → `post_transform` SQL → Console | 验证一个 SeaTunnel Flink Job 内由 SQL 组织多输入，并在 Python transform 前后继续处理数据 |
+
+两个案例都使用 Flink 1.20.5、本地 `BATCH` 模式和单并行度，目标是验证实现链路，不是生产部署模板。
+
+## 架构流程
+
+### 多 Source、多 Sink 与生命周期动作
 
 ```mermaid
 flowchart LR
-    F1["FakeSource A\n2 rows"] --> P1["Python transform\nsource_tag=fake_a"]
-    F2["FakeSource B\n2 rows"] --> P2["Python transform\nsource_tag=fake_b"]
-    PG["PostgreSQL JDBC source\n2 rows"] --> P3["Python transform\nsource_tag=postgres"]
-    HTTP["HTTP Source\n2 rows"] --> P4["Python transform\nsource_tag=http"]
-    P1 --> C1["Console sink"]
-    P2 --> C2["Console sink"]
-    P4 --> C3["Console sink"]
-    P3 --> DB["PostgreSQL JDBC sink"]
-    PRE["pre: JDBC readiness\nsource/sink"] -.-> PG
-    PRE -.-> DB
-    DB --> POST["post: JDBC reconciliation\nsource expected vs sink result"]
+    F1["FakeSource A"] --> T1["Python transform"] --> C1["Console sink"]
+    F2["FakeSource B"] --> T2["Python transform"] --> C2["Console sink"]
+    PG["PostgreSQL JDBC source"] --> T3["Python transform"] --> DB["PostgreSQL JDBC sink"]
+    HTTP["HTTP source"] --> T4["Python transform"] --> C3["Console sink"]
+    READY["source pre: jdbc_ready"] -.-> PG
+    READY -.-> DB
+    DB --> RECON["sink post: jdbc_recon"]
 ```
 
-每个 Source 和 Sink 可以通过顶层 `lifecycle` 配置声明前置动作。当前案例在 PostgreSQL source 和 sink 执行 `jdbc_ready`，确认数据库可连接并且 `select 1` 返回 `1`。Flink Job 成功结束后，JDBC sink 执行 `jdbc_recon`，比较源表经过 Python 规则计算后的行数和摘要与目标表结果；比较失败会使 Job 失败。
+`lifecycle.source.<plugin_output>.pre` 在对应 Source 创建前执行，`lifecycle.sink.<plugin_input>.pre` 在对应 Sink 创建前执行，`lifecycle.sink.<plugin_input>.post` 在 Flink Job 成功结束后执行。当前案例使用 `jdbc_ready` 检查 PostgreSQL 连通性和 `select 1`，使用 `jdbc_recon` 比较源表和目标表的行数及摘要；校验失败会让任务失败。
+
+### SQL JOIN、Python transform 和后置 SQL
+
+```mermaid
+flowchart LR
+    L["left_input\nFakeSource"] --> J["pre_transform SQL\nINNER JOIN"]
+    R["right_input\nFakeSource"] --> J
+    J --> P["Python transform\nper row"]
+    P --> Q["post_transform SQL\nfilter / project"]
+    Q --> S["Console sink"]
+```
+
+SQL 阶段复用 SeaTunnel 已创建的 Flink `StreamExecutionEnvironment`，整个链路只提交一个 Flink Job：
+
+```text
+Source → pre_transform SQL → Python Transform → post_transform SQL → Sink
+```
+
+输入数量由 SQL 中引用的表决定；增加第三路或更多输入时，增加 Source 并在 SQL 中引用对应的表即可，输出仍然是一个 SeaTunnel 表。
 
 ## 案例文件
 
-- 配置：[python_transform_multi_source_multi_sink.conf](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform_multi_source_multi_sink.conf)
+- 生命周期配置：[python_transform_multi_source_multi_sink.conf](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform_multi_source_multi_sink.conf)
+- SQL JOIN 配置：[python_transform_two_source_inner_join.conf](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform_two_source_inner_join.conf)
 - Python 脚本：[python_transform.py](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform.py)
 - 本地 HTTP 服务：[http_source_server.py](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/http_source_server.py)
 
-Python transform 对每行数据执行以下规则：`name` 去空格并转小写，`age + 1`，再从 `context["config"]` 读取 `source_tag`。
+Python transform 对每行执行以下规则：`name` 去空格并转小写，计算 `age + 1`，再从 `context["config"]` 读取 `source_tag`。
+
+## SQL 阶段配置
+
+SQL JOIN 案例使用显式的嵌套配置：
+
+```hocon
+sql {
+  pre_transform {
+    plugin_output = "joined_input"
+    query = "SELECT ... FROM left_input l INNER JOIN right_input r ON l.id = r.id"
+  }
+}
+
+transform {
+  Python {
+    plugin_input = "joined_input"
+    plugin_output = "joined_python"
+    # Python transform 配置省略
+  }
+}
+
+sql {
+  post_transform {
+    plugin_output = "filtered_output"
+    query = "SELECT ... FROM joined_python WHERE age_plus_one >= 30"
+  }
+}
+```
+
+旧的顶层 `sql { query = ... }` 配置仍然按 `pre_transform` 处理，因此已有配置可以继续运行。`post_transform` 必须显式声明在 `sql.post_transform` 下。
 
 ## PostgreSQL 测试表
 
@@ -43,7 +104,7 @@ export PG_USER=root
 export PG_PASSWORD='<your-password>'
 ```
 
-准备测试表和两行输入数据：
+准备生命周期案例使用的测试表和数据：
 
 ```sql
 CREATE TABLE IF NOT EXISTS public.seatunnel_python_input (
@@ -68,7 +129,7 @@ VALUES (301, 'Eve', 28), (302, 'Frank', 35);
 
 ## 定向编译
 
-只编译本案例需要的模块，不构建全仓库发行包：
+只编译本案例所需的模块，不构建全仓库发行包：
 
 ```bash
 ./mvnw -pl \
@@ -79,10 +140,10 @@ VALUES (301, 'Eve', 28), (302, 'Frank', 35);
   seatunnel-translation/seatunnel-translation-flink/seatunnel-translation-flink-20,\
   seatunnel-core/seatunnel-flink-starter/seatunnel-flink-20-starter,\
   seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example \
-  -am -Dflink.1.20.1.version=1.20.5 -DskipTests package
+  -am -Dflink.1.20.1.version=1.20.5 -DskipTests -Dskip.spotless=true package
 ```
 
-Python transform 由 Flink worker 继承的 JVM 参数开启：
+Python transform 由 Flink worker 继承的 JVM 参数开启，并限制可执行解释器：
 
 ```yaml
 env.java.opts.all: >-
@@ -90,22 +151,39 @@ env.java.opts.all: >-
   -Dseatunnel.transform.python.allowed-executables=/opt/homebrew/bin/python3
 ```
 
+本次还执行了以下定向检查：
+
+```bash
+./mvnw -pl seatunnel-core/seatunnel-flink-starter/seatunnel-flink-starter-common \
+  -Dskip.spotless=true \
+  -Dtest=SqlExecuteProcessorTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+./mvnw -pl seatunnel-core/seatunnel-flink-starter/seatunnel-flink-starter-common \
+  -DskipTests spotless:check
+```
+
+结果：`SqlExecuteProcessorTest` 通过 6 个测试，Spotless 检查通过，Flink 1.20.5 定向构建成功。
+
 ## 本地运行
 
-复制 Python 脚本，并启动本地 HTTP Source：
+两个案例都需要把 Python 脚本放到配置中的绝对路径：
 
 ```bash
 cp seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform.py \
   /tmp/seatunnel-python-transform.py
-python3 seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/http_source_server.py
-```
 
-运行目录需要包含 `starter/seatunnel-flink-20-starter.jar`、Fake/HTTP/Console/JDBC/Transform connector、Flink 1.20 translation jar、PostgreSQL JDBC driver，以及案例配置。提交 Job：
-
-```bash
 export FLINK_HOME=/Users/xujiawei/software/flink/flink-1.20.5
 export SEATUNNEL_HOME=/path/to/seatunnel-python-transform-runtime
 export FLINK_CONF_DIR=$SEATUNNEL_HOME/flink-conf
+```
+
+运行目录需要包含 Flink 1.20 translation、Flink 20 starter、Python transform、Fake/HTTP/Console/JDBC connector、PostgreSQL JDBC driver 和对应配置文件。
+
+运行多 Source、多 Sink 生命周期案例：
+
+```bash
+python3 seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/http_source_server.py
 
 $SEATUNNEL_HOME/bin/start-seatunnel-flink-20-connector-v2.sh \
   --master local \
@@ -114,14 +192,26 @@ $SEATUNNEL_HOME/bin/start-seatunnel-flink-20-connector-v2.sh \
   --name PythonTransformLifecycleSmoke
 ```
 
-## 本次结果
+运行 SQL JOIN、Python transform、后置 SQL 案例：
 
-在本机 Flink 1.20.5、局域网 PostgreSQL 和本地 HTTP 服务上完成了一次真实运行：
+```bash
+$SEATUNNEL_HOME/bin/start-seatunnel-flink-20-connector-v2.sh \
+  --master local \
+  --deploy-mode run \
+  -c $SEATUNNEL_HOME/config/python_transform_two_source_inner_join.conf \
+  --name PythonTransformPrePostSqlPoc
+```
+
+## 实际验证结果
+
+### 生命周期案例
+
+在本机 Flink 1.20.5、局域网 PostgreSQL 和本地 HTTP 服务上运行成功：
 
 - Job exit code：`0`
 - `SourceReceivedCount = 8`：Fake 4 行、PostgreSQL 2 行、HTTP 2 行
 - `SinkWriteCount = 8`：三个 Console 分支和一个 PostgreSQL 分支
-- PostgreSQL `jdbc_ready` 在 Job 前执行；`jdbc_recon` 在 Job 成功后执行，结果相等才返回成功
+- PostgreSQL `jdbc_ready` 在 Job 前执行，`jdbc_recon` 在 Job 成功后执行
 - PostgreSQL sink 结果：
 
 ```text
@@ -129,42 +219,44 @@ $SEATUNNEL_HOME/bin/start-seatunnel-flink-20-connector-v2.sh \
 302,Frank,35,frank,36,postgres
 ```
 
-## 私有本地包
+### SQL JOIN 案例
 
-本次生成的私有压缩包只包含 Flink 1.20.5 运行所需的本案例模块和连接器：
+在本机 Flink 1.20.5 上运行成功：
+
+- Job exit code：`0`
+- JobID：`dcf6c4eef8530dde60da224fc2737d0c`
+- `SourceReceivedCount = 4`、`SinkWriteCount = 1`
+- 两路 FakeSource 各发送两行，`pre_transform` SQL 按 `id` 关联得到两行
+- Python transform 增加 `normalized_name`、`age_plus_one`、`source_tag`
+- `post_transform` SQL 过滤出一行
+
+最终 Console 输出：
+
+```text
+302 | Frank | 35 | HR | 2 | frank | 36 | joined
+```
+
+## 私有包
+
+二进制包不提交到 Git。完成本地 runtime 组装后，私有压缩包和校验文件约定放在：
 
 ```text
 seatunnel-dist/target/seatunnel-dist-private-3.0.0-SNAPSHOT.tar.gz
 seatunnel-dist/target/seatunnel-dist-private-3.0.0-SNAPSHOT.tar.gz.sha256
 ```
 
-包内额外提供 `config/http_source_server.py` 和 `config/seatunnel-env.sh`。启动 HTTP 服务后，使用包内 launcher 即可运行同一个配置。
+包内只放本案例所需的 Flink 1.20.5 运行文件、连接器、配置和 `config/http_source_server.py`。如果目标路径不存在，需要先完成定向构建和 runtime 组装；仓库本身不追踪该归档文件。
 
-## 限制
+## 代码位置
 
-- 当前案例使用 Flink BATCH、单并行度和本地 HTTP 服务，目标是验证插件链路，不是生产部署模板。
-- 生命周期动作目前提供 `jdbc_ready`、`jdbc_sql` 和 `jdbc_recon`；`jdbc_recon` 只允许放在 `post` 阶段，并比较单行聚合结果。
-- 全仓库发行包、Flink 1.20 以下版本和未列出的 connector 不在本次构建范围内。
+- Flink 执行顺序和 SQL 阶段：[FlinkExecution.java](seatunnel-core/seatunnel-flink-starter/seatunnel-flink-starter-common/src/main/java/org/apache/seatunnel/core/starter/flink/execution/FlinkExecution.java)
+- SQL 阶段解析和执行：[SqlExecuteProcessor.java](seatunnel-core/seatunnel-flink-starter/seatunnel-flink-starter-common/src/main/java/org/apache/seatunnel/core/starter/flink/execution/SqlExecuteProcessor.java)
+- SQL 阶段测试：[SqlExecuteProcessorTest.java](seatunnel-core/seatunnel-flink-starter/seatunnel-flink-starter-common/src/test/java/org/apache/seatunnel/core/starter/flink/execution/SqlExecuteProcessorTest.java)
 
-## 多 Source SQL JOIN POC
+## 限制与未验证项
 
-SQL 试验位于当前分支，输入表数量由配置中的 SQL 自己决定，输出固定为一个 SeaTunnel 表。当前案例使用两路 FakeSource 验证 Flink 1.20.5 的 SQL `INNER JOIN`：
-
-```mermaid
-flowchart LR
-    L["left_input\nFakeSource"] --> SQL["Flink SQL\nINNER JOIN on id"]
-    R["right_input\nFakeSource"] --> SQL
-    SQL --> P["Python Transform\nper row"] --> SQL2["post_transform SQL\nfilter/project"] --> C["Console Sink"]
-```
-
-配置示例：[python_transform_two_source_inner_join.conf](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform_two_source_inner_join.conf)。SQL 阶段复用 SeaTunnel 已创建的 `StreamExecutionEnvironment`，执行顺序为 `Source → pre_transform SQL → Python Transform → post_transform SQL → Sink`，仍然只提交一个 Flink Job。后续增加第三路或更多输入时，只需要增加 Source 和 SQL 中的表引用。旧的顶层 `sql { query = ... }` 配置继续按 `pre_transform` 处理。
-
-本地 Flink 1.20.5 运行结果：Job exit code 为 `0`，JobID 为 `dcf6c4eef8530dde60da224fc2737d0c`，`SourceReceivedCount = 4`、`SinkWriteCount = 1`。两路 FakeSource 各发送两行，pre_transform SQL 按 `id` 关联得到两行，再交给 Python Transform；post_transform SQL 读取 `age_plus_one` 并过滤出一行。Python 输出字段为 `normalized_name`、`age_plus_one`、`source_tag`。
-
-post_transform SQL 的确定性结果为：
-
-```text
-302 | Frank | 35 | HR      | 2 | frank | 36 | joined
-```
-
-有限的 FakeSource 验证使用 `job.mode = "BATCH"`，SQL 输入按 append-only DataStream 注册；`STREAMING` 模式则使用 changelog DataStream，保留 `INSERT/UPDATE_BEFORE/UPDATE_AFTER/DELETE` 语义。流式普通 JOIN 是持续运行的状态算子，不能用有限 FakeSource 的“自动结束”作为流式 JOIN 的验收条件。当前 POC 尚未覆盖 PostgreSQL CDC、时间窗口、状态 TTL 和多级 Join 的恢复语义。
+- 当前 SQL JOIN 验证使用 Flink `BATCH`、单并行度和有限的 FakeSource 数据。
+- `STREAMING` 路径保留 `INSERT`、`UPDATE_BEFORE`、`UPDATE_AFTER`、`DELETE` changelog 语义，但本次没有用持续运行的真实流源验收持续 JOIN。
+- 本次没有覆盖 PostgreSQL CDC、时间窗口、状态 TTL、checkpoint 恢复、多级 JOIN 或大规模数据。
+- `jdbc_recon` 当前比较单行聚合结果；生产环境仍需按业务主键、重复执行和失败恢复策略补充验收。
+- Flink 1.20 以下版本、未列出的 connector 和全仓库发行包不在本分支构建范围内。
