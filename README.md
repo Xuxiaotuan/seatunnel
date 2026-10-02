@@ -1,95 +1,171 @@
-# Apache SeaTunnel
+# SeaTunnel Python Transform · Flink 1.20.5 验证案例
 
-<img src="https://seatunnel.apache.org/image/logo.png" alt="SeaTunnel Logo" height="200px" align="right" />
+这个分支只用于本地验证 SeaTunnel Python transform plugin。范围固定为 Flink 1.20.5、Fake、HTTP、Console、PostgreSQL JDBC 和 Python transform，覆盖多 Source、多 Sink，以及每一行数据经过 Python transform 的场景。
 
-[![Build Workflow](https://github.com/apache/seatunnel/actions/workflows/build_main.yml/badge.svg?branch=dev)](https://github.com/apache/seatunnel/actions/workflows/build_main.yml)
-[![Join Slack](https://img.shields.io/badge/slack-%23seatunnel-4f8eba?logo=slack)](https://s.apache.org/seatunnel-slack)
-[![Twitter Follow](https://img.shields.io/twitter/follow/ASFSeaTunnel.svg?label=Follow&logo=twitter)](https://twitter.com/ASFSeaTunnel)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/apache/seatunnel)
+分支：`codex/flink-multi-source-join-workbench`
 
-## Overview
-SeaTunnel is a multimodal, high-performance, distributed data integration tool, capable of synchronizing vast amounts of data daily. It's trusted by numerous companies for its efficiency and stability.
+## 流程
 
-## Why Choose SeaTunnel
-SeaTunnel addresses common data integration challenges:
-- **Diverse Data Sources**: Seamlessly integrates with hundreds of evolving data sources.
-- **Multimodal Data Integration**: Supports the integration of video, images, binary files, structured and unstructured text data.
-- **Complex Synchronization Scenarios**: Supports various synchronization methods, including real-time, CDC, and full database synchronization.
-- **Resource Efficiency**: Minimizes computing resources and JDBC connections for real-time synchronization.
-- **Quality and Monitoring**: Provides data quality and monitoring to prevent data loss or duplication.
+```mermaid
+flowchart LR
+    F1["FakeSource A\n2 rows"] --> P1["Python transform\nsource_tag=fake_a"]
+    F2["FakeSource B\n2 rows"] --> P2["Python transform\nsource_tag=fake_b"]
+    PG["PostgreSQL JDBC source\n2 rows"] --> P3["Python transform\nsource_tag=postgres"]
+    HTTP["HTTP Source\n2 rows"] --> P4["Python transform\nsource_tag=http"]
+    P1 --> C1["Console sink"]
+    P2 --> C2["Console sink"]
+    P4 --> C3["Console sink"]
+    P3 --> DB["PostgreSQL JDBC sink"]
+    PRE["pre: JDBC readiness\nsource/sink"] -.-> PG
+    PRE -.-> DB
+    DB --> POST["post: JDBC reconciliation\nsource expected vs sink result"]
+```
 
-## Key Features
-- **Diverse Connectors**: Offers support for over 160 connectors, with ongoing expansion.
-- **Batch-Stream Integration**: Easily adaptable connectors simplify data integration management.
-- **Distributed Snapshot Algorithm**: Ensures data consistency across synchronized data.
-- **Multi-Engine Support**: Works with SeaTunnel Zeta Engine, Flink, and Spark.
-- **JDBC Multiplexing and Log Parsing**: Efficiently synchronizes multi-tables and databases.
-- **High Throughput and Low Latency**: Provides high-throughput data synchronization with low latency.
-- **Real-Time Monitoring**: Offers detailed insights during synchronization.
+每个 Source 和 Sink 可以通过顶层 `lifecycle` 配置声明前置动作。当前案例在 PostgreSQL source 和 sink 执行 `jdbc_ready`，确认数据库可连接并且 `select 1` 返回 `1`。Flink Job 成功结束后，JDBC sink 执行 `jdbc_recon`，比较源表经过 Python 规则计算后的行数和摘要与目标表结果；比较失败会使 Job 失败。
 
-## SeaTunnel Workflow
-![SeaTunnel Workflow](docs/images/architecture_diagram.png)
+## 案例文件
 
-Configure jobs, select execution engines, and parallelize data using Source Connectors. Easily develop and extend connectors to meet your needs.
+- 配置：[python_transform_multi_source_multi_sink.conf](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform_multi_source_multi_sink.conf)
+- Python 脚本：[python_transform.py](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform.py)
+- 本地 HTTP 服务：[http_source_server.py](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/http_source_server.py)
 
-## Supported Connectors
-- [Source Connectors](https://seatunnel.apache.org/docs/connectors/source)
-- [Sink Connectors](https://seatunnel.apache.org/docs/connectors/sink)
-- [Transform Connectors](https://seatunnel.apache.org/docs/transforms)
+Python transform 对每行数据执行以下规则：`name` 去空格并转小写，`age + 1`，再从 `context["config"]` 读取 `source_tag`。
 
-## Getting Started
-Download SeaTunnel from the [Official Website](https://seatunnel.apache.org/download).
-Choose your runtime execution engine:
-- [SeaTunnel Zeta Engine](https://seatunnel.apache.org/docs/getting-started/locally/quick-start-seatunnel-engine)
-- [Spark](https://seatunnel.apache.org/docs/getting-started/locally/quick-start-spark)
-- [Flink](https://seatunnel.apache.org/docs/getting-started/locally/quick-start-flink)
+## PostgreSQL 测试表
 
-## Multimodal Data Integration
-- Most data integration tools support structured and unstructured text data, and SeaTunnel does as well. Simply refer to the desired Source/Sink to use.
-- For integrating video, images, and binary files with SeaTunnel, please refer to the documentation for detailed instructions.
+连接信息通过环境变量提供，不写入配置文件或 Git：
 
-## Apache SeaTunnel Tools
-SeaTunnel Tools provides a range of peripheral tools, including Apache SeaTunnel Mcp Server, etc, please refer to [SeaTunnel Tools](https://github.com/apache/seatunnel-tools).
+```bash
+export PG_HOST=100.82.226.63
+export PG_PORT=30660
+export PG_DATABASE=xxt
+export PG_USER=root
+export PG_PASSWORD='<your-password>'
+```
 
-## Users
-Companies and organizations worldwide use SeaTunnel for research, production, and commercial products. 
-Explore real-world use cases of SeaTunnel, such as JP morgan, S7, JDT, Bytedance, Tencent Cloud. More use cases can be found on the [SeaTunnel Users](https://seatunnel.apache.org/user).
+准备测试表和两行输入数据：
 
-## Code of Conduct
-Participate in this project in accordance with the Contributor Covenant [Code of Conduct](https://www.apache.org/foundation/policies/conduct.html).
+```sql
+CREATE TABLE IF NOT EXISTS public.seatunnel_python_input (
+  id INTEGER PRIMARY KEY,
+  name VARCHAR(128) NOT NULL,
+  age INTEGER NOT NULL
+);
 
-## Contributors
-We appreciate all developers for their contributions. See the [List Of Contributors](https://github.com/apache/seatunnel/graphs/contributors).
+CREATE TABLE IF NOT EXISTS public.seatunnel_python_output (
+  id INTEGER PRIMARY KEY,
+  name VARCHAR(128) NOT NULL,
+  age INTEGER NOT NULL,
+  normalized_name VARCHAR(128),
+  age_plus_one INTEGER,
+  source_tag VARCHAR(64)
+);
 
-## How to Compile
-Refer to this [Setup](https://seatunnel.apache.org/docs/developer/setup) for compilation instructions.
+TRUNCATE public.seatunnel_python_input, public.seatunnel_python_output;
+INSERT INTO public.seatunnel_python_input (id, name, age)
+VALUES (301, 'Eve', 28), (302, 'Frank', 35);
+```
 
-## Contact Us
-- Mail list: **dev@seatunnel.apache.org**. Subscribe by sending an email to `dev-subscribe@seatunnel.apache.org`.
-- Slack: [Join SeaTunnel Slack](https://s.apache.org/seatunnel-slack)
-- Twitter: [ASFSeaTunnel on Twitter](https://twitter.com/ASFSeaTunnel)
+## 定向编译
 
-## Landscapes
-SeaTunnel enriches the [CNCF CLOUD NATIVE Landscape](https://landscape.cncf.io/?landscape=observability-and-analysis&license=Apache+License+2.0).
+只编译本案例需要的模块，不构建全仓库发行包：
 
-## License
-[Apache 2.0 License](LICENSE)
+```bash
+./mvnw -pl \
+  seatunnel-connectors-v2/connector-fake,\
+  seatunnel-connectors-v2/connector-console,\
+  seatunnel-connectors-v2/connector-http/connector-http-base,\
+  seatunnel-connectors-v2/connector-jdbc,\
+  seatunnel-translation/seatunnel-translation-flink/seatunnel-translation-flink-20,\
+  seatunnel-core/seatunnel-flink-starter/seatunnel-flink-20-starter,\
+  seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example \
+  -am -Dflink.1.20.1.version=1.20.5 -DskipTests package
+```
 
-## Frequently Asked Questions
+Python transform 由 Flink worker 继承的 JVM 参数开启：
 
-### 1. How do I install SeaTunnel?
+```yaml
+env.java.opts.all: >-
+  -Dseatunnel.transform.python.enabled=true
+  -Dseatunnel.transform.python.allowed-executables=/opt/homebrew/bin/python3
+```
 
-Follow the [Local Deployment](https://seatunnel.apache.org/docs/getting-started/locally/deployment) on SeaTunnel website to get 
-started quickly.
-Please refer to the [Cluster Deployment](https://seatunnel.apache.org/docs/engines/zeta/hybrid-cluster-deployment)
+## 本地运行
 
-### 2. Where can I find documentation and tutorials?
-[Official Documentation](https://seatunnel.apache.org/docs) includes detailed guides and tutorials to help you get started.
+复制 Python 脚本，并启动本地 HTTP Source：
 
-### 3. Is there a community or support channel?
-You can submit an issue on [GitHub Issues](https://github.com/apache/seatunnel/issues).
-Join our Slack community [SeaTunnel Slack](https://s.apache.org/seatunnel-slack).
-More information, please refer to [FAQ](https://seatunnel.apache.org/docs/faq). 
+```bash
+cp seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform.py \
+  /tmp/seatunnel-python-transform.py
+python3 seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/http_source_server.py
+```
 
-### 4. How can I contribute to SeaTunnel?
-We welcome contributions! Please refer to our [Contribution Guidelines](https://seatunnel.apache.org/docs/developer/coding-guide) for details.
+运行目录需要包含 `starter/seatunnel-flink-20-starter.jar`、Fake/HTTP/Console/JDBC/Transform connector、Flink 1.20 translation jar、PostgreSQL JDBC driver，以及案例配置。提交 Job：
+
+```bash
+export FLINK_HOME=/Users/xujiawei/software/flink/flink-1.20.5
+export SEATUNNEL_HOME=/path/to/seatunnel-python-transform-runtime
+export FLINK_CONF_DIR=$SEATUNNEL_HOME/flink-conf
+
+$SEATUNNEL_HOME/bin/start-seatunnel-flink-20-connector-v2.sh \
+  --master local \
+  --deploy-mode run \
+  -c $SEATUNNEL_HOME/config/python_transform_multi_source_multi_sink.conf \
+  --name PythonTransformLifecycleSmoke
+```
+
+## 本次结果
+
+在本机 Flink 1.20.5、局域网 PostgreSQL 和本地 HTTP 服务上完成了一次真实运行：
+
+- Job exit code：`0`
+- `SourceReceivedCount = 8`：Fake 4 行、PostgreSQL 2 行、HTTP 2 行
+- `SinkWriteCount = 8`：三个 Console 分支和一个 PostgreSQL 分支
+- PostgreSQL `jdbc_ready` 在 Job 前执行；`jdbc_recon` 在 Job 成功后执行，结果相等才返回成功
+- PostgreSQL sink 结果：
+
+```text
+301,Eve,28,eve,29,postgres
+302,Frank,35,frank,36,postgres
+```
+
+## 私有本地包
+
+本次生成的私有压缩包只包含 Flink 1.20.5 运行所需的本案例模块和连接器：
+
+```text
+seatunnel-dist/target/seatunnel-dist-private-3.0.0-SNAPSHOT.tar.gz
+seatunnel-dist/target/seatunnel-dist-private-3.0.0-SNAPSHOT.tar.gz.sha256
+```
+
+包内额外提供 `config/http_source_server.py` 和 `config/seatunnel-env.sh`。启动 HTTP 服务后，使用包内 launcher 即可运行同一个配置。
+
+## 限制
+
+- 当前案例使用 Flink BATCH、单并行度和本地 HTTP 服务，目标是验证插件链路，不是生产部署模板。
+- 生命周期动作目前提供 `jdbc_ready`、`jdbc_sql` 和 `jdbc_recon`；`jdbc_recon` 只允许放在 `post` 阶段，并比较单行聚合结果。
+- 全仓库发行包、Flink 1.20 以下版本和未列出的 connector 不在本次构建范围内。
+
+## 多 Source SQL JOIN POC
+
+SQL 试验位于当前分支，输入表数量由配置中的 SQL 自己决定，输出固定为一个 SeaTunnel 表。当前案例使用两路 FakeSource 验证 Flink 1.20.5 的 SQL `INNER JOIN`：
+
+```mermaid
+flowchart LR
+    L["left_input\nFakeSource"] --> SQL["Flink SQL\nINNER JOIN on id"]
+    R["right_input\nFakeSource"] --> SQL
+    SQL --> P["Python Transform\nper row"] --> C["Console Sink"]
+```
+
+配置示例：[python_transform_two_source_inner_join.conf](seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/python_transform_two_source_inner_join.conf)。SQL 阶段复用 SeaTunnel 已创建的 `StreamExecutionEnvironment`，执行顺序为 `Source → SQL → Python Transform → Sink`，仍然只提交一个 Flink Job。后续增加第三路或更多输入时，只需要增加 Source 和 SQL 中的表引用。
+
+本地 Flink 1.20.5 运行结果：Job exit code 为 `0`，JobID 为 `670d5ecb79faa23f1af4d5bf1d08a48f`，`SourceReceivedCount = 4`、`SinkWriteCount = 2`。两路 FakeSource 各发送两行，SQL 按 `id` 关联得到两行，再交给 Python Transform；Python 输出字段为 `normalized_name`、`age_plus_one`、`source_tag`。
+
+两行结果的确定性内容为：
+
+```text
+301 | Eve   | 28 | Finance | 1 | eve   | 29 | joined
+302 | Frank | 35 | HR      | 2 | frank | 36 | joined
+```
+
+有限的 FakeSource 验证使用 `job.mode = "BATCH"`，SQL 输入按 append-only DataStream 注册；`STREAMING` 模式则使用 changelog DataStream，保留 `INSERT/UPDATE_BEFORE/UPDATE_AFTER/DELETE` 语义。流式普通 JOIN 是持续运行的状态算子，不能用有限 FakeSource 的“自动结束”作为流式 JOIN 的验收条件。当前 POC 尚未覆盖 PostgreSQL CDC、时间窗口、状态 TTL 和多级 Join 的恢复语义。
