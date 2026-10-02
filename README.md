@@ -32,7 +32,7 @@ flowchart LR
     DB --> RECON["sink post: jdbc_recon"]
 ```
 
-`lifecycle.source.<plugin_output>.pre` 在对应 Source 创建前执行，`lifecycle.sink.<plugin_input>.pre` 在对应 Sink 创建前执行，`lifecycle.sink.<plugin_input>.post` 在 Flink Job 成功结束后执行。当前案例使用 `jdbc_ready` 检查 PostgreSQL 连通性和 `select 1`，使用 `jdbc_recon` 比较源表和目标表的行数及摘要；校验失败会让任务失败。
+Flink 执行顺序是先统一执行所有 Source 的 `pre`，再统一执行所有 Sink 的 `pre`，然后创建 Source、执行数据处理链路和 Sink；Job 成功后先执行所有 Sink 的 `post`，再执行所有 Source 的 `post`。配置路径分别是 `lifecycle.source.<plugin_output>.(pre|post)` 和 `lifecycle.sink.<plugin_input>.(pre|post)`。当前案例使用 `jdbc_ready` 检查 PostgreSQL 连通性和 `select 1`，使用 `jdbc_recon` 比较源表和目标表的行数及摘要；`jdbc_recon` 只允许放在 `post` 阶段，校验失败会让任务失败。
 
 ### SQL JOIN、Python transform 和后置 SQL
 
@@ -151,6 +151,8 @@ env.java.opts.all: >-
   -Dseatunnel.transform.python.allowed-executables=/opt/homebrew/bin/python3
 ```
 
+`/opt/homebrew/bin/python3` 只是示例，必须替换为运行 Flink worker 的机器上允许的 Python 解释器绝对路径。
+
 本次还执行了以下定向检查：
 
 ```bash
@@ -180,11 +182,15 @@ export FLINK_CONF_DIR=$SEATUNNEL_HOME/flink-conf
 
 运行目录需要包含 Flink 1.20 translation、Flink 20 starter、Python transform、Fake/HTTP/Console/JDBC connector、PostgreSQL JDBC driver 和对应配置文件。
 
-运行多 Source、多 Sink 生命周期案例：
+运行多 Source、多 Sink 生命周期案例。在一个终端启动 HTTP 服务，在另一个终端提交 Job：
 
 ```bash
 python3 seatunnel-examples/seatunnel-flink-examples/seatunnel-flink-20-example/src/main/resources/examples/http_source_server.py
+```
 
+另一个终端执行：
+
+```bash
 $SEATUNNEL_HOME/bin/start-seatunnel-flink-20-connector-v2.sh \
   --master local \
   --deploy-mode run \
@@ -219,6 +225,8 @@ $SEATUNNEL_HOME/bin/start-seatunnel-flink-20-connector-v2.sh \
 302,Frank,35,frank,36,postgres
 ```
 
+字段顺序为 `id, name, age, normalized_name, age_plus_one, source_tag`。
+
 ### SQL JOIN 案例
 
 在本机 Flink 1.20.5 上运行成功：
@@ -233,8 +241,10 @@ $SEATUNNEL_HOME/bin/start-seatunnel-flink-20-connector-v2.sh \
 最终 Console 输出：
 
 ```text
-302 | Frank | 35 | HR | 2 | frank | 36 | joined
+302 | Frank | 35 | 302 | HR | 2 | frank | 36 | joined
 ```
+
+字段顺序为 `id, name, age, right_id, right_name, right_age, normalized_name, age_plus_one, source_tag`。
 
 ## 私有包
 
