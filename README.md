@@ -32,7 +32,9 @@ flowchart LR
     DB --> RECON["sink post: jdbc_recon"]
 ```
 
-Flink 执行顺序是先统一执行所有 Source 的 `pre`，再统一执行所有 Sink 的 `pre`，然后创建 Source、执行数据处理链路和 Sink；Job 成功后先执行所有 Sink 的 `post`，再执行所有 Source 的 `post`。配置路径分别是 `lifecycle.source.<plugin_output>.(pre|post)` 和 `lifecycle.sink.<plugin_input>.(pre|post)`。当前案例使用 `jdbc_ready` 检查 PostgreSQL 连通性和 `select 1`，使用 `jdbc_recon` 比较源表和目标表的行数及摘要；`jdbc_recon` 只允许放在 `post` 阶段，校验失败会让任务失败。
+Flink 会先校验并执行所有 Source 的 `pre`，再执行所有 Sink 的 `pre`；这些动作完成后才初始化 Source、Transform 和 Sink connector。Job 成功后先执行所有 Sink 的 `post`，再执行所有 Source 的 `post`。配置路径分别是 `lifecycle.source.<plugin_output>.(pre|post)` 和 `lifecycle.sink.<plugin_input>.(pre|post)`。当前案例使用 `jdbc_ready` 检查 PostgreSQL 连通性和 `select 1`，使用 `jdbc_recon` 比较源表和目标表的行数及摘要；`jdbc_recon` 只允许放在 `post` 阶段，校验失败会让任务失败。
+
+生命周期配置会在建图前校验目标是否真实存在、动作类型和必填连接参数。`jdbc_recon` 支持 `source_url/source_driver/source_username/source_password` 与 `sink_url/sink_driver/sink_username/sink_password` 分开配置；如果没有分开配置，则回退到公共的 `url/driver/username/password`。动作可设置正数 `query_timeout_seconds`，避免 readiness、SQL 或 recon 查询无限等待。
 
 ### SQL JOIN、Python transform 和后置 SQL
 
@@ -51,7 +53,7 @@ SQL 阶段复用 SeaTunnel 已创建的 Flink `StreamExecutionEnvironment`，整
 Source → pre_transform SQL → Python Transform → post_transform SQL → Sink
 ```
 
-输入数量由 SQL 中引用的表决定；增加第三路或更多输入时，增加 Source 并在 SQL 中引用对应的表即可，输出仍然是一个 SeaTunnel 表。
+每个嵌套 SQL 阶段都必须用 `plugin_input` 显式列出可见输入；增加第三路或更多输入时，增加 Source 并把它加入对应 SQL 阶段的 `plugin_input` 即可，输出仍然是一个 SeaTunnel 表。当前阶段只接受 Flink `BATCH`，避免把没有 watermark、状态 TTL 和恢复策略的无界 JOIN 当成可用的 Streaming 语义。
 
 ## 案例文件
 
@@ -69,8 +71,14 @@ SQL JOIN 案例使用显式的嵌套配置：
 ```hocon
 sql {
   pre_transform {
+    plugin_input = ["left_input", "right_input"]
     plugin_output = "joined_input"
     query = "SELECT ... FROM left_input l INNER JOIN right_input r ON l.id = r.id"
+  }
+  post_transform {
+    plugin_input = "joined_python"
+    plugin_output = "filtered_output"
+    query = "SELECT ... FROM joined_python WHERE age_plus_one >= 30"
   }
 }
 
@@ -81,16 +89,9 @@ transform {
     # Python transform 配置省略
   }
 }
-
-sql {
-  post_transform {
-    plugin_output = "filtered_output"
-    query = "SELECT ... FROM joined_python WHERE age_plus_one >= 30"
-  }
-}
 ```
 
-旧的顶层 `sql { query = ... }` 配置仍然按 `pre_transform` 处理，因此已有配置可以继续运行。`post_transform` 必须显式声明在 `sql.post_transform` 下。
+旧的顶层 `sql { query = ... }` 配置仍然按 `pre_transform` 处理，并保留“使用所有上游输入”的兼容行为。嵌套 `pre_transform` 和 `post_transform` 必须显式声明 `plugin_input`；`post_transform` 必须声明在 `sql.post_transform` 下。
 
 ## PostgreSQL 测试表
 
@@ -158,6 +159,12 @@ env.java.opts.all: >-
 ```bash
 ./mvnw -pl seatunnel-core/seatunnel-flink-starter/seatunnel-flink-starter-common \
   -Dskip.spotless=true \
+  -Dtest=JobLifecycleExecutorTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+./mvnw -pl seatunnel-core/seatunnel-flink-starter/seatunnel-flink-20-starter \
+  -Dflink.1.20.1.version=1.20.5 \
+  -Dskip.spotless=true \
   -Dtest=SqlExecuteProcessorTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
@@ -165,7 +172,7 @@ env.java.opts.all: >-
   -DskipTests spotless:check
 ```
 
-结果：`SqlExecuteProcessorTest` 通过 6 个测试，Spotless 检查通过，Flink 1.20.5 定向构建成功。
+结果：公共 Flink starter 的定向测试共 11 个通过（包含本次新增的生命周期校验和延迟初始化测试），公共模块 Spotless 通过，Flink 1.20 starter 的 `validate` 和 Spotless 通过。SQL 实现已移入 Flink 1.20 starter，公共 Flink starter 只通过反射按配置加载它。当前工作树无法完成 Flink 1.20 starter 的完整 Maven reactor 构建：本地缺少 `seatunnel-translation-flink-20:3.0.0-SNAPSHOT`，且基线的 `seatunnel-config-shade` 源码不完整；因此 SQL 9 个测试和最终运行包仍标记为 `evidence_incomplete`。
 
 ## 本地运行
 
@@ -260,13 +267,13 @@ seatunnel-dist/target/seatunnel-dist-private-3.0.0-SNAPSHOT.tar.gz.sha256
 ## 代码位置
 
 - Flink 执行顺序和 SQL 阶段：[FlinkExecution.java](seatunnel-core/seatunnel-flink-starter/seatunnel-flink-starter-common/src/main/java/org/apache/seatunnel/core/starter/flink/execution/FlinkExecution.java)
-- SQL 阶段解析和执行：[SqlExecuteProcessor.java](seatunnel-core/seatunnel-flink-starter/seatunnel-flink-starter-common/src/main/java/org/apache/seatunnel/core/starter/flink/execution/SqlExecuteProcessor.java)
-- SQL 阶段测试：[SqlExecuteProcessorTest.java](seatunnel-core/seatunnel-flink-starter/seatunnel-flink-starter-common/src/test/java/org/apache/seatunnel/core/starter/flink/execution/SqlExecuteProcessorTest.java)
+- SQL 阶段解析和执行：[SqlExecuteProcessor.java](seatunnel-core/seatunnel-flink-starter/seatunnel-flink-20-starter/src/main/java/org/apache/seatunnel/core/starter/flink/execution/SqlExecuteProcessor.java)
+- SQL 阶段测试：[SqlExecuteProcessorTest.java](seatunnel-core/seatunnel-flink-starter/seatunnel-flink-20-starter/src/test/java/org/apache/seatunnel/core/starter/flink/execution/SqlExecuteProcessorTest.java)
 
 ## 限制与未验证项
 
 - 当前 SQL JOIN 验证使用 Flink `BATCH`、单并行度和有限的 FakeSource 数据。
-- `STREAMING` 路径保留 `INSERT`、`UPDATE_BEFORE`、`UPDATE_AFTER`、`DELETE` changelog 语义，但本次没有用持续运行的真实流源验收持续 JOIN。
+- 当前 SQL 阶段在 `STREAMING` 模式会直接失败；要支持无界 JOIN，还需要明确 watermark、状态 TTL、checkpoint 和恢复语义。
 - 本次没有覆盖 PostgreSQL CDC、时间窗口、状态 TTL、checkpoint 恢复、多级 JOIN 或大规模数据。
 - `jdbc_recon` 当前比较单行聚合结果；生产环境仍需按业务主键、重复执行和失败恢复策略补充验收。
 - Flink 1.20 以下版本、未列出的 connector 和全仓库发行包不在本分支构建范围内。

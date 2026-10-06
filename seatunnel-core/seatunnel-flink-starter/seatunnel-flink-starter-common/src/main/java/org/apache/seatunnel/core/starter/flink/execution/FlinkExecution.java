@@ -73,24 +73,30 @@ public class FlinkExecution implements TaskExecution {
     }
 
     private static final Logger LOGGER = LoggerFactory.getLogger(FlinkExecution.class);
+    private static final String SQL_PROCESSOR_CLASS =
+            "org.apache.seatunnel.core.starter.flink.execution.SqlExecuteProcessor";
 
     private final FlinkRuntimeEnvironment flinkRuntimeEnvironment;
-    private final PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
+    private PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
             sourcePluginExecuteProcessor;
-    private final PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
+    private PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
             transformPluginExecuteProcessor;
-    private final PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
+    private PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
             preTransformSqlExecuteProcessor;
-    private final PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
+    private PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
             postTransformSqlExecuteProcessor;
-    private final PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
+    private PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>
             sinkPluginExecuteProcessor;
     private final List<URL> jarPaths;
     private final List<? extends Config> sourceConfigs;
     private final List<? extends Config> sinkConfigs;
     private final JobLifecycleExecutor jobLifecycleExecutor;
+    private final Config jobConfig;
+    private final Config envConfig;
+    private final JobContext jobContext;
 
     public FlinkExecution(Config config) {
+        this.jobConfig = config;
         try {
             this.sourceConfigs = config.getConfigList(Constants.SOURCE);
             this.sinkConfigs = config.getConfigList(Constants.SINK);
@@ -107,42 +113,21 @@ public class FlinkExecution implements TaskExecution {
         } catch (MalformedURLException e) {
             throw new SeaTunnelException("load flink starter error.", e);
         }
-        Config envConfig = config.getConfig("env");
+        this.envConfig = config.getConfig("env");
         registerPlugin(envConfig);
-        JobContext jobContext = new JobContext();
-        jobContext.setJobMode(RuntimeEnvironment.getJobMode(config));
-        jobContext.setEnableCheckpoint(RuntimeEnvironment.getEnableCheckpoint(config));
-
-        this.sourcePluginExecuteProcessor =
-                new SourceExecuteProcessor(jarPaths, envConfig, sourceConfigs, jobContext);
-        this.transformPluginExecuteProcessor =
-                new TransformExecuteProcessor(
-                        jarPaths,
-                        envConfig,
-                        TypesafeConfigUtils.getConfigList(
-                                config, Constants.TRANSFORM, Collections.emptyList()),
-                        jobContext);
-        this.preTransformSqlExecuteProcessor =
-                new SqlExecuteProcessor(config, SqlExecuteProcessor.PRE_TRANSFORM);
-        this.postTransformSqlExecuteProcessor =
-                new SqlExecuteProcessor(config, SqlExecuteProcessor.POST_TRANSFORM);
-        this.sinkPluginExecuteProcessor =
-                new SinkExecuteProcessor(jarPaths, envConfig, sinkConfigs, jobContext);
+        this.jobContext = new JobContext();
+        this.jobContext.setJobMode(RuntimeEnvironment.getJobMode(config));
+        this.jobContext.setEnableCheckpoint(RuntimeEnvironment.getEnableCheckpoint(config));
 
         this.flinkRuntimeEnvironment =
                 FlinkRuntimeEnvironment.getInstance(
                         this.registerPlugin(config, new HashSet<>(jarPaths)));
-
-        this.sourcePluginExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
-        this.transformPluginExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
-        this.preTransformSqlExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
-        this.postTransformSqlExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
-        this.sinkPluginExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
     }
 
     @Override
     public void execute() throws TaskExecuteException {
         jobLifecycleExecutor.executePre(sourceConfigs, sinkConfigs);
+        initializeProcessors();
         List<DataStreamTableInfo> dataStreams = new ArrayList<>();
         dataStreams = sourcePluginExecuteProcessor.execute(dataStreams);
         dataStreams = preTransformSqlExecuteProcessor.execute(dataStreams);
@@ -185,6 +170,99 @@ public class FlinkExecution implements TaskExecution {
         } catch (Exception e) {
             throw new TaskExecuteException("Execute Flink job error", e);
         }
+    }
+
+    private void initializeProcessors() {
+        if (sourcePluginExecuteProcessor != null
+                && transformPluginExecuteProcessor != null
+                && preTransformSqlExecuteProcessor != null
+                && postTransformSqlExecuteProcessor != null
+                && sinkPluginExecuteProcessor != null) {
+            return;
+        }
+        preTransformSqlExecuteProcessor = createSqlProcessor(jobConfig, "pre_transform");
+        postTransformSqlExecuteProcessor = createSqlProcessor(jobConfig, "post_transform");
+        sourcePluginExecuteProcessor =
+                new SourceExecuteProcessor(jarPaths, envConfig, sourceConfigs, jobContext);
+        transformPluginExecuteProcessor =
+                new TransformExecuteProcessor(
+                        jarPaths,
+                        envConfig,
+                        TypesafeConfigUtils.getConfigList(
+                                jobConfig, Constants.TRANSFORM, Collections.emptyList()),
+                        jobContext);
+        sinkPluginExecuteProcessor =
+                new SinkExecuteProcessor(jarPaths, envConfig, sinkConfigs, jobContext);
+
+        sourcePluginExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
+        transformPluginExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
+        preTransformSqlExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
+        postTransformSqlExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
+        sinkPluginExecuteProcessor.setRuntimeEnvironment(flinkRuntimeEnvironment);
+    }
+
+    boolean processorsInitialized() {
+        return sourcePluginExecuteProcessor != null
+                && transformPluginExecuteProcessor != null
+                && preTransformSqlExecuteProcessor != null
+                && postTransformSqlExecuteProcessor != null
+                && sinkPluginExecuteProcessor != null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment> createSqlProcessor(
+            Config config, String stageName) {
+        if (!hasSqlStage(config, stageName)) {
+            return new PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>() {
+                @Override
+                public List<DataStreamTableInfo> execute(List<DataStreamTableInfo> inputs) {
+                    return inputs;
+                }
+
+                @Override
+                public void setRuntimeEnvironment(FlinkRuntimeEnvironment runtimeEnvironment) {
+                    // No-op when the stage is not configured.
+                }
+            };
+        }
+        try {
+            Class<?> processorClass;
+            try {
+                processorClass =
+                        Class.forName(
+                                SQL_PROCESSOR_CLASS,
+                                true,
+                                Thread.currentThread().getContextClassLoader());
+            } catch (ClassNotFoundException contextClassLoaderFailure) {
+                processorClass =
+                        Class.forName(SQL_PROCESSOR_CLASS, true, getClass().getClassLoader());
+            }
+            return (PluginExecuteProcessor<DataStreamTableInfo, FlinkRuntimeEnvironment>)
+                    processorClass
+                            .getConstructor(Config.class, String.class)
+                            .newInstance(config, stageName);
+        } catch (ClassNotFoundException e) {
+            throw new TaskExecuteException(
+                    "SQL stage '"
+                            + stageName
+                            + "' is only available in the Flink 1.20 starter; use the Flink 1.20 runtime",
+                    e);
+        } catch (ReflectiveOperationException e) {
+            throw new TaskExecuteException(
+                    "Unable to create Flink SQL stage '" + stageName + "'", e);
+        }
+    }
+
+    private boolean hasSqlStage(Config config, String stageName) {
+        if (!config.hasPath("sql")) {
+            return false;
+        }
+        Config sqlRoot = config.getConfig("sql");
+        if (sqlRoot.hasPath(stageName)) {
+            return true;
+        }
+        return "pre_transform".equals(stageName)
+                && (sqlRoot.hasPath("query") || sqlRoot.hasPath("plugin_output"));
     }
 
     private void registerPlugin(Config envConfig) {

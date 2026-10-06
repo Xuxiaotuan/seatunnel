@@ -18,6 +18,7 @@
 package org.apache.seatunnel.core.starter.flink.execution;
 
 import org.apache.seatunnel.shade.com.typesafe.config.Config;
+import org.apache.seatunnel.shade.com.typesafe.config.ConfigValueType;
 
 import org.apache.seatunnel.api.table.catalog.CatalogTable;
 import org.apache.seatunnel.api.table.catalog.CatalogTableUtil;
@@ -49,17 +50,22 @@ import org.apache.flink.types.Row;
 
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Executes one Flink SQL query over all source tables and exposes its single result to downstream
- * SeaTunnel transforms and sinks.
+ * Executes one Flink SQL query over its declared input tables and exposes its single result to
+ * downstream SeaTunnel transforms and sinks.
  *
  * <p>The table environment is created from the existing StreamExecutionEnvironment, so this stage
  * contributes operators to the same Flink job rather than submitting a second job.
+ *
+ * <p>This private validation implementation is loaded only by the Flink 1.20 starter. SQL stages
+ * are deliberately limited to BATCH mode until an unbounded join contract (watermarks, state TTL,
+ * and recovery) is defined.
  */
 @Slf4j
 public class SqlExecuteProcessor
@@ -70,6 +76,7 @@ public class SqlExecuteProcessor
 
     private final Config sqlConfig;
     private final String stageName;
+    private final boolean requiresExplicitInputs;
     private FlinkRuntimeEnvironment runtimeEnvironment;
 
     public SqlExecuteProcessor(Config config) {
@@ -79,6 +86,8 @@ public class SqlExecuteProcessor
     public SqlExecuteProcessor(Config config, String stageName) {
         this.stageName = stageName;
         this.sqlConfig = resolveStageConfig(config, stageName);
+        this.requiresExplicitInputs =
+                config.hasPath("sql") && config.getConfig("sql").hasPath(stageName);
     }
 
     static Config resolveStageConfig(Config rootConfig, String stageName) {
@@ -101,6 +110,50 @@ public class SqlExecuteProcessor
         return sqlConfig != null;
     }
 
+    static void validateJobMode(JobMode jobMode, String stageName) {
+        if (jobMode != JobMode.BATCH) {
+            throw new TaskExecuteException(
+                    "Flink SQL stage '"
+                            + stageName
+                            + "' only supports BATCH mode; configure a bounded job before using a SQL join");
+        }
+    }
+
+    List<String> resolveInputNames(List<String> availableInputNames) {
+        if (sqlConfig == null) {
+            return Collections.emptyList();
+        }
+        if (!requiresExplicitInputs && PRE_TRANSFORM.equals(stageName)) {
+            return new ArrayList<>(availableInputNames);
+        }
+        if (!sqlConfig.hasPath("plugin_input")) {
+            throw new IllegalArgumentException(
+                    "sql." + stageName + ".plugin_input must declare one or more input tables");
+        }
+        List<String> configuredInputs;
+        if (sqlConfig.getValue("plugin_input").valueType() == ConfigValueType.LIST) {
+            configuredInputs = sqlConfig.getStringList("plugin_input");
+        } else {
+            configuredInputs = Collections.singletonList(sqlConfig.getString("plugin_input"));
+        }
+        if (configuredInputs.isEmpty()
+                || configuredInputs.stream()
+                        .anyMatch(name -> name == null || name.trim().isEmpty())) {
+            throw new IllegalArgumentException(
+                    "sql." + stageName + ".plugin_input must not be empty");
+        }
+        for (String inputName : configuredInputs) {
+            if (!availableInputNames.contains(inputName)) {
+                throw new IllegalArgumentException(
+                        "SQL input table '"
+                                + inputName
+                                + "' is not available; available tables: "
+                                + availableInputNames);
+            }
+        }
+        return configuredInputs;
+    }
+
     @Override
     public List<DataStreamTableInfo> execute(List<DataStreamTableInfo> upstreamDataStreams)
             throws TaskExecuteException {
@@ -110,6 +163,7 @@ public class SqlExecuteProcessor
         if (runtimeEnvironment == null) {
             throw new TaskExecuteException("Flink runtime environment is required for SQL stage");
         }
+        validateJobMode(runtimeEnvironment.getJobMode(), stageName);
 
         try {
             String query = requiredString("query");
@@ -117,9 +171,17 @@ public class SqlExecuteProcessor
             StreamTableEnvironment tableEnvironment =
                     StreamTableEnvironment.create(
                             runtimeEnvironment.getStreamExecutionEnvironment());
-            Map<String, DataStreamTableInfo> inputs = indexInputs(upstreamDataStreams);
-            for (DataStreamTableInfo input : inputs.values()) {
-                registerInput(tableEnvironment, input, runtimeEnvironment.getJobMode());
+            Map<String, DataStreamTableInfo> allInputs = indexInputs(upstreamDataStreams);
+            List<String> inputNames = resolveInputNames(new ArrayList<>(allInputs.keySet()));
+            if (inputNames.contains(outputName)) {
+                throw new IllegalArgumentException(
+                        "SQL output table must differ from its input table: " + outputName);
+            }
+            for (String inputName : inputNames) {
+                registerInput(
+                        tableEnvironment,
+                        allInputs.get(inputName),
+                        runtimeEnvironment.getJobMode());
             }
 
             Table result = tableEnvironment.sqlQuery(query);

@@ -25,12 +25,17 @@ import org.apache.seatunnel.api.table.type.DecimalType;
 import org.apache.seatunnel.api.table.type.RowKind;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
+import org.apache.seatunnel.common.constants.JobMode;
+import org.apache.seatunnel.core.starter.exception.TaskExecuteException;
 
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.types.Row;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+
+import java.util.Arrays;
+import java.util.List;
 
 class SqlExecuteProcessorTest {
 
@@ -116,5 +121,51 @@ class SqlExecuteProcessorTest {
         Assertions.assertThrows(
                 IllegalArgumentException.class,
                 () -> SqlExecuteProcessor.toFlinkDataType(BasicType.VOID_TYPE));
+    }
+
+    @Test
+    void rejectsStreamingSqlStagesUntilBoundedJoinSemanticsAreConfigured() {
+        Assertions.assertThrows(
+                TaskExecuteException.class,
+                () ->
+                        SqlExecuteProcessor.validateJobMode(
+                                JobMode.STREAMING, SqlExecuteProcessor.PRE_TRANSFORM));
+    }
+
+    @Test
+    void requiresExplicitInputsForNestedSqlStages() {
+        Config config =
+                ConfigFactory.parseString(
+                        "sql {\n"
+                                + " pre_transform {\n"
+                                + "  plugin_output = joined\n"
+                                + "  query = \"SELECT * FROM left_input\"\n"
+                                + " }\n"
+                                + "}\n");
+
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new SqlExecuteProcessor(config, SqlExecuteProcessor.PRE_TRANSFORM)
+                                .resolveInputNames(Arrays.asList("left_input", "right_input")));
+    }
+
+    @Test
+    void selectsOnlyDeclaredSqlInputs() {
+        Config config =
+                ConfigFactory.parseString(
+                        "sql {\n"
+                                + " post_transform {\n"
+                                + "  plugin_input = [joined]\n"
+                                + "  plugin_output = final\n"
+                                + "  query = \"SELECT * FROM joined\"\n"
+                                + " }\n"
+                                + "}\n");
+
+        List<String> inputs =
+                new SqlExecuteProcessor(config, SqlExecuteProcessor.POST_TRANSFORM)
+                        .resolveInputNames(Arrays.asList("joined", "unrelated"));
+
+        Assertions.assertEquals(Arrays.asList("joined"), inputs);
     }
 }
