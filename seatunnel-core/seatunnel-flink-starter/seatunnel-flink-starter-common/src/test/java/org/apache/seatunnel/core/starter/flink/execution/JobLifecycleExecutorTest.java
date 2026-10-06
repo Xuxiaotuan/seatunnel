@@ -94,4 +94,35 @@ class JobLifecycleExecutorTest {
                                         Collections.singletonList(source),
                                         Collections.emptyList()));
     }
+
+    @Test
+    void fallsBackWhenPreferredConnectionValueIsBlank() {
+        Config config = ConfigFactory.parseString("url = \"jdbc:test\"\n" + "source_url = \"\"\n");
+
+        Assertions.assertEquals(
+                "jdbc:test",
+                JobLifecycleExecutor.resolveConnectionValue(config, "source_url", "url"));
+    }
+
+    @Test
+    void wrapsInvalidLifecycleValueTypesAsTaskExecuteException() {
+        Config config =
+                ConfigFactory.parseString(
+                        "lifecycle {\n"
+                                + " source {\n"
+                                + "  input {\n"
+                                + "   pre { type = jdbc_ready, url = \"jdbc:test\", query = \"select 1\", query_timeout_seconds = \"bad\" }\n"
+                                + "  }\n"
+                                + " }\n"
+                                + "}\n");
+        Config source = ConfigFactory.parseString("plugin_output = input");
+
+        Assertions.assertThrows(
+                TaskExecuteException.class,
+                () ->
+                        new JobLifecycleExecutor(config)
+                                .validateConfiguration(
+                                        Collections.singletonList(source),
+                                        Collections.emptyList()));
+    }
 }

@@ -34,6 +34,9 @@ import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.Arrays;
 import java.util.List;
 
@@ -167,5 +170,67 @@ class SqlExecuteProcessorTest {
                         .resolveInputNames(Arrays.asList("joined", "unrelated"));
 
         Assertions.assertEquals(Arrays.asList("joined"), inputs);
+    }
+
+    @Test
+    void rejectsDuplicateSqlInputs() {
+        Config config =
+                ConfigFactory.parseString(
+                        "sql {\n"
+                                + " post_transform {\n"
+                                + "  plugin_input = [joined, joined]\n"
+                                + "  plugin_output = final\n"
+                                + "  query = \"SELECT * FROM joined\"\n"
+                                + " }\n"
+                                + "}\n");
+
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new SqlExecuteProcessor(config, SqlExecuteProcessor.POST_TRANSFORM)
+                                .resolveInputNames(Arrays.asList("joined")));
+    }
+
+    @Test
+    void rejectsAmbiguousLegacyAndNestedPreTransformSql() {
+        Config config =
+                ConfigFactory.parseString(
+                        "sql {\n"
+                                + " query = \"SELECT 1\"\n"
+                                + " plugin_output = legacy\n"
+                                + " pre_transform {\n"
+                                + "  plugin_input = [left_input]\n"
+                                + "  plugin_output = nested\n"
+                                + "  query = \"SELECT * FROM left_input\"\n"
+                                + " }\n"
+                                + "}\n");
+
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> new SqlExecuteProcessor(config, SqlExecuteProcessor.PRE_TRANSFORM));
+    }
+
+    @Test
+    void convertsSeaTunnelNestedValuesToFlinkValues() {
+        OffsetDateTime timestamp = OffsetDateTime.of(2026, 10, 7, 0, 0, 0, 0, ZoneOffset.UTC);
+        SeaTunnelRow nested = new SeaTunnelRow(new Object[] {"nested"});
+        SeaTunnelRow input = new SeaTunnelRow(new Object[] {timestamp, nested});
+
+        Row converted = SqlExecuteProcessor.toFlinkRow(input);
+
+        Assertions.assertEquals(timestamp.toZonedDateTime(), converted.getField(0));
+        Assertions.assertEquals("nested", ((Row) converted.getField(1)).getField(0));
+    }
+
+    @Test
+    void convertsFlinkNestedValuesToSeaTunnelValues() {
+        ZonedDateTime timestamp = ZonedDateTime.of(2026, 10, 7, 0, 0, 0, 0, ZoneOffset.UTC);
+        Row nested = Row.of("nested");
+        Row input = Row.of(timestamp, nested);
+
+        SeaTunnelRow converted = SqlExecuteProcessor.toSeaTunnelRow(input, "result");
+
+        Assertions.assertEquals(timestamp.toOffsetDateTime(), converted.getField(0));
+        Assertions.assertEquals("nested", ((SeaTunnelRow) converted.getField(1)).getField(0));
     }
 }

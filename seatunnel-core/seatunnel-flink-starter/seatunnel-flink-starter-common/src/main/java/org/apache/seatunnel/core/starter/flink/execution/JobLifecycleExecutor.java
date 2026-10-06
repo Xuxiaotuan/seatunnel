@@ -65,11 +65,17 @@ public class JobLifecycleExecutor {
 
     void validateConfiguration(
             List<? extends Config> sourceConfigs, List<? extends Config> sinkConfigs) {
-        if (!rootConfig.hasPath(LIFECYCLE)) {
-            return;
+        try {
+            if (!rootConfig.hasPath(LIFECYCLE)) {
+                return;
+            }
+            validatePluginLifecycle("source", sourceConfigs);
+            validatePluginLifecycle("sink", sinkConfigs);
+        } catch (TaskExecuteException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new TaskExecuteException("Invalid lifecycle configuration", e);
         }
-        validatePluginLifecycle("source", sourceConfigs);
-        validatePluginLifecycle("sink", sinkConfigs);
     }
 
     private void validatePluginLifecycle(String pluginType, List<? extends Config> pluginConfigs) {
@@ -244,6 +250,9 @@ public class JobLifecycleExecutor {
                     throw new SQLException(
                             "expected '" + expected + "' but received '" + actual + "'");
                 }
+                if (resultSet.next()) {
+                    throw new SQLException("readiness query must return exactly one row");
+                }
             }
             LOGGER.info("Lifecycle {} readiness check passed for target '{}'.", phase, target);
         }
@@ -296,7 +305,7 @@ public class JobLifecycleExecutor {
             String usernameKey,
             String passwordKey)
             throws SQLException, ClassNotFoundException {
-        String url = config.hasPath(urlKey) ? config.getString(urlKey) : config.getString("url");
+        String url = resolveConnectionValue(config, urlKey, "url");
         try (Connection connection =
                         openConnection(config, url, driverKey, usernameKey, passwordKey);
                 PreparedStatement statement =
@@ -355,10 +364,20 @@ public class JobLifecycleExecutor {
     }
 
     private String connectionValue(Config config, String preferredKey, String fallbackKey) {
+        return resolveConnectionValue(config, preferredKey, fallbackKey);
+    }
+
+    static String resolveConnectionValue(Config config, String preferredKey, String fallbackKey) {
         if (config.hasPath(preferredKey)) {
-            return config.getString(preferredKey);
+            String preferredValue = config.getString(preferredKey);
+            if (!preferredValue.trim().isEmpty()) {
+                return preferredValue;
+            }
         }
-        return config.hasPath(fallbackKey) ? config.getString(fallbackKey) : "";
+        if (config.hasPath(fallbackKey)) {
+            return config.getString(fallbackKey);
+        }
+        return "";
     }
 
     private void configureQueryTimeout(PreparedStatement statement, Config config)

@@ -127,6 +127,7 @@ public class FlinkExecution implements TaskExecution {
     @Override
     public void execute() throws TaskExecuteException {
         jobLifecycleExecutor.executePre(sourceConfigs, sinkConfigs);
+        validateSqlStageModes();
         initializeProcessors();
         List<DataStreamTableInfo> dataStreams = new ArrayList<>();
         dataStreams = sourcePluginExecuteProcessor.execute(dataStreams);
@@ -150,25 +151,54 @@ public class FlinkExecution implements TaskExecution {
                 LOGGER.info("Flink job Mode: {}", JobMode.BATCH);
             }
         }
+        final long jobStartTime = System.currentTimeMillis();
+        final JobExecutionResult jobResult;
+        final long jobEndTime;
         try {
-            final long jobStartTime = System.currentTimeMillis();
-            JobExecutionResult jobResult =
+            jobResult =
                     flinkRuntimeEnvironment
                             .getStreamExecutionEnvironment()
                             .execute(flinkRuntimeEnvironment.getJobName());
-            final long jobEndTime = System.currentTimeMillis();
-
-            final FlinkJobMetricsSummary jobMetricsSummary =
-                    FlinkJobMetricsSummary.builder()
-                            .jobExecutionResult(jobResult)
-                            .jobStartTime(jobStartTime)
-                            .jobEndTime(jobEndTime)
-                            .build();
-
-            LOGGER.info("Job finished, execution result: \n{}", jobMetricsSummary);
-            jobLifecycleExecutor.executePost(sourceConfigs, sinkConfigs);
+            jobEndTime = System.currentTimeMillis();
         } catch (Exception e) {
             throw new TaskExecuteException("Execute Flink job error", e);
+        }
+
+        final FlinkJobMetricsSummary jobMetricsSummary =
+                FlinkJobMetricsSummary.builder()
+                        .jobExecutionResult(jobResult)
+                        .jobStartTime(jobStartTime)
+                        .jobEndTime(jobEndTime)
+                        .build();
+
+        LOGGER.info("Job finished, execution result: \n{}", jobMetricsSummary);
+        try {
+            jobLifecycleExecutor.executePost(sourceConfigs, sinkConfigs);
+        } catch (TaskExecuteException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new TaskExecuteException("Post lifecycle validation error", e);
+        }
+    }
+
+    private void validateSqlStageModes() {
+        if (flinkRuntimeEnvironment.getJobMode() == JobMode.BATCH) {
+            return;
+        }
+        if (hasSqlStage(jobConfig, "pre_transform")) {
+            validateSqlStageMode(flinkRuntimeEnvironment.getJobMode(), "pre_transform");
+        }
+        if (hasSqlStage(jobConfig, "post_transform")) {
+            validateSqlStageMode(flinkRuntimeEnvironment.getJobMode(), "post_transform");
+        }
+    }
+
+    static void validateSqlStageMode(JobMode jobMode, String stageName) {
+        if (jobMode != JobMode.BATCH) {
+            throw new TaskExecuteException(
+                    "Flink SQL stage '"
+                            + stageName
+                            + "' only supports BATCH mode; configure a bounded job before using a SQL join");
         }
     }
 

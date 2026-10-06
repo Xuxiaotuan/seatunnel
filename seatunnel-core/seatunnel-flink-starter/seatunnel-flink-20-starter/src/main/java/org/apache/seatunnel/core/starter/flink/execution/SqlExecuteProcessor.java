@@ -50,6 +50,10 @@ import org.apache.flink.types.Row;
 
 import lombok.extern.slf4j.Slf4j;
 
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -95,6 +99,11 @@ public class SqlExecuteProcessor
             return null;
         }
         Config sqlRoot = rootConfig.getConfig("sql");
+        boolean hasLegacySql = sqlRoot.hasPath("query") || sqlRoot.hasPath("plugin_output");
+        if (PRE_TRANSFORM.equals(stageName) && hasLegacySql && sqlRoot.hasPath(PRE_TRANSFORM)) {
+            throw new IllegalArgumentException(
+                    "Do not configure both legacy sql.query/sql.plugin_output and sql.pre_transform");
+        }
         if (sqlRoot.hasPath(stageName)) {
             return sqlRoot.getConfig(stageName);
         }
@@ -141,6 +150,10 @@ public class SqlExecuteProcessor
                         .anyMatch(name -> name == null || name.trim().isEmpty())) {
             throw new IllegalArgumentException(
                     "sql." + stageName + ".plugin_input must not be empty");
+        }
+        if (configuredInputs.stream().distinct().count() != configuredInputs.size()) {
+            throw new IllegalArgumentException(
+                    "sql." + stageName + ".plugin_input must not contain duplicate table names");
         }
         for (String inputName : configuredInputs) {
             if (!availableInputNames.contains(inputName)) {
@@ -449,10 +462,10 @@ public class SqlExecuteProcessor
         }
     }
 
-    private static Row toFlinkRow(SeaTunnelRow row) {
+    static Row toFlinkRow(SeaTunnelRow row) {
         Row result = Row.withPositions(toFlinkRowKind(row.getRowKind()), row.getArity());
         for (int i = 0; i < row.getArity(); i++) {
-            result.setField(i, row.getField(i));
+            result.setField(i, toFlinkValue(row.getField(i)));
         }
         return result;
     }
@@ -460,11 +473,83 @@ public class SqlExecuteProcessor
     static SeaTunnelRow toSeaTunnelRow(Row row, String tableName) {
         SeaTunnelRow result = new SeaTunnelRow(row.getArity());
         for (int i = 0; i < row.getArity(); i++) {
-            result.setField(i, row.getField(i));
+            result.setField(i, toSeaTunnelValue(row.getField(i)));
         }
         result.setTableId(tableName);
         result.setRowKind(toSeaTunnelRowKind(row.getKind()));
         return result;
+    }
+
+    private static Object toFlinkValue(Object value) {
+        if (value == null
+                || value instanceof String
+                || value instanceof Number
+                || value instanceof Boolean) {
+            return value;
+        }
+        if (value instanceof OffsetDateTime) {
+            return ((OffsetDateTime) value).toZonedDateTime();
+        }
+        if (value instanceof SeaTunnelRow) {
+            return toFlinkRow((SeaTunnelRow) value);
+        }
+        if (value instanceof Object[]) {
+            Object[] values = (Object[]) value;
+            Object[] converted = new Object[values.length];
+            for (int i = 0; i < values.length; i++) {
+                converted[i] = toFlinkValue(values[i]);
+            }
+            return converted;
+        }
+        if (value instanceof Map) {
+            Map<Object, Object> converted = new LinkedHashMap<>();
+            ((Map<?, ?>) value)
+                    .forEach(
+                            (key, entryValue) ->
+                                    converted.put(toFlinkValue(key), toFlinkValue(entryValue)));
+            return converted;
+        }
+        return value;
+    }
+
+    private static Object toSeaTunnelValue(Object value) {
+        if (value == null
+                || value instanceof String
+                || value instanceof Number
+                || value instanceof Boolean
+                || value instanceof OffsetDateTime
+                || value instanceof java.time.LocalDate
+                || value instanceof java.time.LocalTime
+                || value instanceof java.time.LocalDateTime) {
+            return value;
+        }
+        if (value instanceof ZonedDateTime) {
+            return ((ZonedDateTime) value).toOffsetDateTime();
+        }
+        if (value instanceof Instant) {
+            return OffsetDateTime.ofInstant((Instant) value, ZoneOffset.UTC);
+        }
+        if (value instanceof Row) {
+            return toSeaTunnelRow((Row) value, "");
+        }
+        if (value instanceof Object[]) {
+            Object[] values = (Object[]) value;
+            Object[] converted = new Object[values.length];
+            for (int i = 0; i < values.length; i++) {
+                converted[i] = toSeaTunnelValue(values[i]);
+            }
+            return converted;
+        }
+        if (value instanceof Map) {
+            Map<Object, Object> converted = new LinkedHashMap<>();
+            ((Map<?, ?>) value)
+                    .forEach(
+                            (key, entryValue) ->
+                                    converted.put(
+                                            toSeaTunnelValue(key), toSeaTunnelValue(entryValue)));
+            return converted;
+        }
+        return value;
     }
 
     private static org.apache.flink.types.RowKind toFlinkRowKind(RowKind rowKind) {

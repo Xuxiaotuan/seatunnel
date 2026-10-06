@@ -19,6 +19,9 @@ package org.apache.seatunnel.core.starter.flink.execution;
 
 import org.apache.seatunnel.shade.com.typesafe.config.ConfigFactory;
 
+import org.apache.seatunnel.common.constants.JobMode;
+import org.apache.seatunnel.core.starter.exception.TaskExecuteException;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -34,5 +37,17 @@ class FlinkExecutionTest {
                                         + "sink = []\n"));
 
         Assertions.assertFalse(execution.processorsInitialized());
+    }
+
+    @Test
+    void rejectsSqlStageInStreamingBeforeConnectorInitialization() {
+        TaskExecuteException exception =
+                Assertions.assertThrows(
+                        TaskExecuteException.class,
+                        () ->
+                                FlinkExecution.validateSqlStageMode(
+                                        JobMode.STREAMING, "pre_transform"));
+
+        Assertions.assertTrue(exception.getMessage().contains("only supports BATCH mode"));
     }
 }
