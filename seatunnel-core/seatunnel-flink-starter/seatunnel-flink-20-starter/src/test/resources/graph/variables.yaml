@@ -1,0 +1,13 @@
+apiVersion: seatunnel.apache.org/v1alpha1
+kind: FlinkGraphJob
+runtime:
+  engine: flink
+  version: "1.20.5"
+  mode: batch
+nodes:
+  source:
+    plugin: jdbc
+    operation: read
+    config:
+      url: jdbc:postgresql://${PG_HOST}:30660/xxt
+      user: root

@@ -44,6 +44,60 @@ Choose your runtime execution engine:
 - [Spark](https://seatunnel.apache.org/docs/getting-started/locally/quick-start-spark)
 - [Flink](https://seatunnel.apache.org/docs/getting-started/locally/quick-start-flink)
 
+## Experimental Flink YAML DAG
+
+This branch contains an experimental Flink 1.20 DAG runner for validating a
+YAML-first job shape. A graph declares named nodes and their `inputs`; the
+runner resolves the dependencies, creates one shared Flink environment, and
+submits one job. A node can be a SeaTunnel source, the existing Python
+transform, a bounded Batch SQL query, a SeaTunnel sink, or a small control
+action. The legacy `source` / `transform` / `sink` configuration remains
+unchanged.
+
+```mermaid
+flowchart LR
+    orders[FakeSource orders] --> normalize[Python normalized]
+    customers[FakeSource customers] --> enrich[SQL enrich]
+    normalize --> enrich
+    enrich --> output[Console sink]
+    output -. completion .-> recon[Optional JDBC action]
+```
+
+The minimal validation flow is in
+[`examples/flink/graph/fake-python-sql-console.yaml`](examples/flink/graph/fake-python-sql-console.yaml).
+It demonstrates two sources, a Python row transform, a multi-input SQL node,
+and one sink. The PostgreSQL variant keeps connection values as runtime
+variables in [`examples/flink/graph/postgres-python-jdbc.yaml`](examples/flink/graph/postgres-python-jdbc.yaml).
+
+The current runner targets Flink 1.20.x (validated locally with Flink 1.20.5):
+
+```bash
+./mvnw -pl seatunnel-core/seatunnel-flink-starter/seatunnel-flink-20-starter \
+  -DskipITs -DskipTests package
+FLINK_HOME=/Users/xujiawei/software/flink/flink-1.20.5
+java \
+  -Dseatunnel.transform.python.enabled=true \
+  -Dseatunnel.transform.python.allowed-executables=/opt/homebrew/bin/python3 \
+  -cp "target/seatunnel-python-transform-flink20-private-3.0.0-SNAPSHOT/lib/seatunnel-flink-20-starter.jar:target/seatunnel-python-transform-flink20-private-3.0.0-SNAPSHOT/lib/connector-fake-3.0.0-SNAPSHOT-2.12.15.jar:target/seatunnel-python-transform-flink20-private-3.0.0-SNAPSHOT/lib/connector-console-3.0.0-SNAPSHOT-2.12.15.jar:target/seatunnel-python-transform-flink20-private-3.0.0-SNAPSHOT/lib/seatunnel-transforms-v2.jar:$FLINK_HOME/lib/*" \
+  org.apache.seatunnel.core.starter.flink.graph.execution.FlinkGraphMain \
+  examples/flink/graph/fake-python-sql-console.yaml
+```
+
+The graph API and current limits are documented in
+[`docs/zh/architecture/flink-yaml-dag.md`](docs/zh/architecture/flink-yaml-dag.md)
+and its [English version](docs/en/architecture/flink-yaml-dag.md). This is an
+experimental branch: the checked-in evidence covers parser, planner, node
+contracts, the local Flink SQL bridge, and one shared-job submission. A real
+PostgreSQL run still requires the connector and JDBC driver packages to be
+assembled for the target deployment.
+
+Verified locally: the focused graph suite passes 20 tests, the selected Flink
+starter packages successfully against Flink 1.20.5 dependencies, the Fake →
+Python → SQL → Console example exits with code 0 when Python security is
+explicitly enabled, and `SELECT 1` succeeds against the supplied PostgreSQL
+endpoint. The private selected-module archive is generated at
+`target/seatunnel-python-transform-flink20-private-3.0.0-SNAPSHOT.tar.gz`.
+
 ## Multimodal Data Integration
 - Most data integration tools support structured and unstructured text data, and SeaTunnel does as well. Simply refer to the desired Source/Sink to use.
 - For integrating video, images, and binary files with SeaTunnel, please refer to the documentation for detailed instructions.

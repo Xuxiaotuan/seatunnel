@@ -1,0 +1,6 @@
+apiVersion: seatunnel.apache.org/v1alpha1
+kind: FlinkGraphJob
+runtime:
+  engine: flink
+  version: "1.20.5"
+  mode: batch

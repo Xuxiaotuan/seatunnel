@@ -1,0 +1,36 @@
+apiVersion: seatunnel.apache.org/v1alpha1
+kind: FlinkGraphJob
+runtime:
+  engine: flink
+  version: "1.20.5"
+  mode: batch
+  parallelism: 1
+nodes:
+  orders:
+    plugin: fake
+    operation: read
+    inputs: []
+    config:
+      schema: id INT, customer_id INT
+  customers:
+    plugin: fake
+    operation: read
+    inputs: []
+    config:
+      schema: customer_id INT, name STRING
+  normalize:
+    plugin: Python
+    operation: map
+    inputs: [orders]
+    config:
+      columns: [id, customer_id]
+      plugin_specific_option: kept
+  enrich:
+    plugin: sql
+    operation: query
+    inputs:
+      orders: normalize
+      customers: customers
+    config:
+      query: SELECT * FROM orders
+      plugin_specific_option: kept

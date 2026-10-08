@@ -37,6 +37,7 @@
         <module>seatunnel-flink-15-starter</module>
         <module>seatunnel-flink-20-starter</module>
         <module>seatunnel-flink-starter-common</module>
+        <module>seatunnel-flink-graph-api</module>
     </modules>
 
     <properties>
