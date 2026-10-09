@@ -19,6 +19,7 @@ package org.apache.seatunnel.core.starter.flink.graph.node;
 
 import org.apache.seatunnel.core.starter.flink.graph.api.GraphNodeDefinition;
 import org.apache.seatunnel.core.starter.flink.graph.resolve.ResolvedNode;
+import org.apache.seatunnel.core.starter.flink.graph.runtime.CompletionRuntimeValue;
 import org.apache.seatunnel.core.starter.flink.graph.runtime.NodeExecutionContext;
 
 import org.junit.jupiter.api.Assertions;
@@ -68,6 +69,27 @@ class ActionNodeExecutorTest {
                                 new JdbcActionExecutor()
                                         .execute(context(node), Collections.emptyMap()));
         Assertions.assertFalse(error.getMessage().contains("secret-password"));
+    }
+
+    @Test
+    void acceptsCompletionInputForReconciliation() {
+        GraphNodeDefinition definition =
+                new GraphNodeDefinition(
+                        "recon",
+                        "jdbc_action",
+                        "check",
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+        ResolvedNode node = new ResolvedNode(definition);
+        Map<String, org.apache.seatunnel.core.starter.flink.graph.runtime.GraphRuntimeValue>
+                inputs = Collections.singletonMap("output", new CompletionRuntimeValue("output"));
+
+        IllegalArgumentException error =
+                Assertions.assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new JdbcActionExecutor().execute(context(node), inputs));
+
+        Assertions.assertTrue(error.getMessage().contains("config.url"));
     }
 
     private static NodeExecutionContext context(ResolvedNode node) {

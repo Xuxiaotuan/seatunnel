@@ -18,6 +18,7 @@
 package org.apache.seatunnel.core.starter.flink.graph.node;
 
 import org.apache.seatunnel.core.starter.flink.graph.resolve.ResolvedNode;
+import org.apache.seatunnel.core.starter.flink.graph.runtime.CompletionRuntimeValue;
 import org.apache.seatunnel.core.starter.flink.graph.runtime.ControlRuntimeValue;
 import org.apache.seatunnel.core.starter.flink.graph.runtime.GraphNodeExecutor;
 import org.apache.seatunnel.core.starter.flink.graph.runtime.GraphRuntimeValue;
@@ -37,9 +38,15 @@ public final class JdbcActionExecutor implements GraphNodeExecutor {
             NodeExecutionContext context, Map<String, GraphRuntimeValue> inputValues)
             throws Exception {
         ResolvedNode node = context.node();
-        if (!inputValues.isEmpty()) {
+        if (inputValues.size() > 1) {
             throw new IllegalArgumentException(
-                    "JDBC action " + node.id() + " cannot consume data values");
+                    "JDBC action " + node.id() + " accepts at most one completion input");
+        }
+        for (GraphRuntimeValue input : inputValues.values()) {
+            if (!(input instanceof CompletionRuntimeValue)) {
+                throw new IllegalArgumentException(
+                        "JDBC action " + node.id() + " only accepts a completion input");
+            }
         }
         String url = required(node, "url");
         String query = required(node, "query");

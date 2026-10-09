@@ -62,7 +62,7 @@ public final class GraphFlinkExecution {
                 inputs.put(binding.alias(), value);
             }
             GraphNodeExecutor executor = prepared.executor(node);
-            if (node.definition().plugin().endsWith("_action") && !inputs.isEmpty()) {
+            if (containsCompletionInput(inputs)) {
                 deferredActions.put(node, inputs);
                 continue;
             }
@@ -94,6 +94,17 @@ public final class GraphFlinkExecution {
             values.put(entry.getKey().id(), value);
         }
         return new GraphExecutionResult(jobName, ids(prepared.order()), jobResult, 1);
+    }
+
+    private static boolean containsCompletionInput(Map<String, GraphRuntimeValue> inputs) {
+        for (GraphRuntimeValue value : inputs.values()) {
+            if (value.kind()
+                    == org.apache.seatunnel.core.starter.flink.graph.api.NodeCapability.ValueKind
+                            .COMPLETION) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static List<String> ids(List<ResolvedNode> nodes) {

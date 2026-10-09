@@ -68,6 +68,9 @@ The minimal validation flow is in
 It demonstrates two sources, a Python row transform, a multi-input SQL node,
 and one sink. The PostgreSQL variant keeps connection values as runtime
 variables in [`examples/flink/graph/postgres-python-jdbc.yaml`](examples/flink/graph/postgres-python-jdbc.yaml).
+The lifecycle variant adds task-level JDBC preparation and reconciliation nodes in [`examples/flink/graph/postgres-python-jdbc-recon.yaml`](examples/flink/graph/postgres-python-jdbc-recon.yaml).
+
+`inputs` expresses both data and lifecycle dependencies. A control action such as `prepare` runs before Flink submission; a node consuming a sink completion such as `recon` runs after the Flink job succeeds. These actions run once in the client orchestration layer. They are not per-record operators and are not part of the Flink checkpoint or sink transaction boundary.
 
 The current runner targets Flink 1.20.x (validated locally with Flink 1.20.5):
 
@@ -91,11 +94,12 @@ contracts, the local Flink SQL bridge, and one shared-job submission. A real
 PostgreSQL run still requires the connector and JDBC driver packages to be
 assembled for the target deployment.
 
-Verified locally: the focused graph suite passes 20 tests, the selected Flink
-starter packages successfully against Flink 1.20.5 dependencies, the Fake →
-Python → SQL → Console example exits with code 0 when Python security is
-explicitly enabled, and `SELECT 1` succeeds against the supplied PostgreSQL
-endpoint. The private selected-module archive is generated at
+Verified locally: the focused graph suite passes 31 tests, the selected Flink
+starter packages successfully against Flink 1.20.5 dependencies, and the Fake
+→ Python → SQL → Console example exits with code 0 when Python security is
+explicitly enabled. The supplied PostgreSQL endpoint accepts TCP connections;
+a fresh SQL probe still requires a local PostgreSQL client or Python driver.
+The private selected-module archive is generated at
 `target/seatunnel-python-transform-flink20-private-3.0.0-SNAPSHOT.tar.gz`.
 
 ## Multimodal Data Integration

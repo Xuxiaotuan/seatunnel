@@ -32,6 +32,7 @@ import org.apache.seatunnel.common.constants.EngineType;
 import org.apache.seatunnel.common.constants.PluginType;
 import org.apache.seatunnel.core.starter.flink.execution.DataStreamTableInfo;
 import org.apache.seatunnel.core.starter.flink.graph.resolve.ResolvedNode;
+import org.apache.seatunnel.core.starter.flink.graph.runtime.ControlRuntimeValue;
 import org.apache.seatunnel.core.starter.flink.graph.runtime.DataRuntimeValue;
 import org.apache.seatunnel.core.starter.flink.graph.runtime.GraphNodeExecutor;
 import org.apache.seatunnel.core.starter.flink.graph.runtime.GraphRuntimeValue;
@@ -57,8 +58,12 @@ public final class SourceNodeExecutor implements GraphNodeExecutor {
     public GraphRuntimeValue execute(
             NodeExecutionContext context, Map<String, GraphRuntimeValue> inputValues) {
         ResolvedNode node = context.node();
-        if (!inputValues.isEmpty()) {
-            throw new IllegalArgumentException("Source node " + node.id() + " cannot have inputs");
+        for (org.apache.seatunnel.core.starter.flink.graph.runtime.GraphRuntimeValue input :
+                inputValues.values()) {
+            if (!(input instanceof ControlRuntimeValue)) {
+                throw new IllegalArgumentException(
+                        "Source node " + node.id() + " only accepts control dependencies");
+            }
         }
         Config config = GraphNodeConfig.toPluginConfig(node.definition());
         ClassLoader classLoader = Thread.currentThread().getContextClassLoader();

@@ -80,11 +80,63 @@ class GraphValidatorTest {
     }
 
     @Test
+    void acceptsControlDependencyBeforeSource() {
+        Map<String, GraphNodeDefinition> nodes = new LinkedHashMap<>();
+        nodes.put("prepare", node("prepare", Collections.emptyList(), "action"));
+        nodes.put("source", node("source", Collections.singletonList("prepare"), "source"));
+        ResolvedGraph graph = resolver.resolve(job(nodes));
+
+        Assertions.assertDoesNotThrow(
+                () ->
+                        validator.validate(
+                                graph, factories(controlFactory(), controlSourceFactory())));
+    }
+
+    @Test
+    void acceptsCompletionDependencyForTerminalAction() {
+        Map<String, GraphNodeDefinition> nodes = new LinkedHashMap<>();
+        nodes.put("sink", node("sink", Collections.emptyList(), "sink"));
+        nodes.put("recon", node("recon", Collections.singletonList("sink"), "action"));
+        ResolvedGraph graph = resolver.resolve(job(nodes));
+
+        Assertions.assertDoesNotThrow(
+                () ->
+                        validator.validate(
+                                graph,
+                                factories(completionSinkFactory(), completionActionFactory())));
+    }
+
+    @Test
     void rejectsMismatchedNodeMapIdentity() {
         Map<String, GraphNodeDefinition> nodes = new LinkedHashMap<>();
         nodes.put("map_key", node("actual_id", Collections.emptyList(), "source"));
 
         Assertions.assertThrows(IllegalArgumentException.class, () -> job(nodes));
+    }
+
+    @Test
+    void rejectsUnsupportedGraphEnvelope() {
+        Map<String, GraphNodeDefinition> nodes = new LinkedHashMap<>();
+        nodes.put("source", node("source", Collections.emptyList(), "source"));
+        GraphJobDefinition invalid =
+                new GraphJobDefinition(
+                        "seatunnel.apache.org/v2",
+                        "OtherJob",
+                        new GraphRuntimeDefinition("spark", "3.5.0", "streaming"),
+                        nodes);
+
+        GraphValidationException error =
+                Assertions.assertThrows(
+                        GraphValidationException.class,
+                        () ->
+                                validator.validate(
+                                        invalidGraph(invalid), factories(dataFactory("source"))));
+
+        Assertions.assertTrue(error.getMessage().contains("apiVersion"));
+    }
+
+    private static ResolvedGraph invalidGraph(GraphJobDefinition definition) {
+        return new InputDependencyResolver().resolve(definition);
     }
 
     private static Map<String, GraphNodeFactory> factories(GraphNodeFactory... values) {
@@ -123,6 +175,49 @@ class GraphValidatorTest {
                 "action",
                 NodeCapability.builder()
                         .inputCount(0, 0)
+                        .produces(NodeCapability.ValueKind.CONTROL)
+                        .supportsBatch(true)
+                        .build());
+    }
+
+    private static GraphNodeFactory controlFactory() {
+        return factory(
+                "action",
+                NodeCapability.builder()
+                        .inputCount(0, 0)
+                        .produces(NodeCapability.ValueKind.CONTROL)
+                        .supportsBatch(true)
+                        .build());
+    }
+
+    private static GraphNodeFactory controlSourceFactory() {
+        return factory(
+                "source",
+                NodeCapability.builder()
+                        .inputCount(0, Integer.MAX_VALUE)
+                        .acceptsInput(NodeCapability.ValueKind.CONTROL)
+                        .produces(NodeCapability.ValueKind.DATA)
+                        .supportsBatch(true)
+                        .build());
+    }
+
+    private static GraphNodeFactory completionSinkFactory() {
+        return factory(
+                "sink",
+                NodeCapability.builder()
+                        .inputCount(0, 0)
+                        .produces(NodeCapability.ValueKind.COMPLETION)
+                        .supportsBatch(true)
+                        .producesCompletion(true)
+                        .build());
+    }
+
+    private static GraphNodeFactory completionActionFactory() {
+        return factory(
+                "action",
+                NodeCapability.builder()
+                        .inputCount(1, 1)
+                        .acceptsInput(NodeCapability.ValueKind.COMPLETION)
                         .produces(NodeCapability.ValueKind.CONTROL)
                         .supportsBatch(true)
                         .build());

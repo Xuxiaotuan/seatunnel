@@ -27,7 +27,15 @@ import java.util.Map;
 /** Validates plugin capabilities and value-kind compatibility before execution. */
 public final class GraphValidator {
 
+    private static final String API_VERSION = "seatunnel.apache.org/v1alpha1";
+    private static final String KIND = "FlinkGraphJob";
+    private static final String ENGINE = "flink";
+    private static final String MODE = "batch";
+    private static final java.util.regex.Pattern FLINK_20 =
+            java.util.regex.Pattern.compile("1\\.20(?:\\.\\d+)?");
+
     public void validate(ResolvedGraph graph, Map<String, GraphNodeFactory> factories) {
+        validateEnvelope(graph);
         if (factories == null) {
             throw new GraphValidationException("Graph factories must not be null");
         }
@@ -85,6 +93,32 @@ public final class GraphValidator {
                                     + upstream.id());
                 }
             }
+        }
+    }
+
+    private static void validateEnvelope(ResolvedGraph graph) {
+        if (!API_VERSION.equals(graph.definition().apiVersion())) {
+            throw new GraphValidationException(
+                    "Unsupported graph apiVersion: " + graph.definition().apiVersion());
+        }
+        if (!KIND.equals(graph.definition().kind())) {
+            throw new GraphValidationException(
+                    "Unsupported graph kind: " + graph.definition().kind());
+        }
+        if (!ENGINE.equalsIgnoreCase(graph.definition().runtime().engine())) {
+            throw new GraphValidationException(
+                    "Graph runtime.engine must be flink but was "
+                            + graph.definition().runtime().engine());
+        }
+        if (!FLINK_20.matcher(graph.definition().runtime().version()).matches()) {
+            throw new GraphValidationException(
+                    "Graph runtime.version must be Flink 1.20.x but was "
+                            + graph.definition().runtime().version());
+        }
+        if (!MODE.equalsIgnoreCase(graph.definition().runtime().mode())) {
+            throw new GraphValidationException(
+                    "Graph runtime.mode must be batch but was "
+                            + graph.definition().runtime().mode());
         }
     }
 

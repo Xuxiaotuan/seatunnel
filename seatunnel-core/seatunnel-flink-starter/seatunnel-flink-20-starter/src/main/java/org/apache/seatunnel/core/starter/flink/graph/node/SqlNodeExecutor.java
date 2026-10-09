@@ -61,8 +61,20 @@ public final class SqlNodeExecutor implements GraphNodeExecutor {
             inputs.put(entry.getKey(), value);
         }
         String query = query(node);
-        Table result = tableEnvironment.sqlQuery(query);
-        DataStream<Row> rows = TableUtil.tableToDataStream(tableEnvironment, result);
+        Table result;
+        try {
+            result = tableEnvironment.sqlQuery(query);
+        } catch (RuntimeException error) {
+            throw new IllegalArgumentException(
+                    "SQL node " + node.id() + " failed to plan config.query", error);
+        }
+        DataStream<Row> rows;
+        try {
+            rows = TableUtil.tableToDataStream(tableEnvironment, result);
+        } catch (RuntimeException error) {
+            throw new IllegalArgumentException(
+                    "SQL node " + node.id() + " failed to materialize query output", error);
+        }
         DataStream<org.apache.seatunnel.api.table.type.SeaTunnelRow> output =
                 rows.map(new ChangelogRowMapper(node.id()))
                         .returns(

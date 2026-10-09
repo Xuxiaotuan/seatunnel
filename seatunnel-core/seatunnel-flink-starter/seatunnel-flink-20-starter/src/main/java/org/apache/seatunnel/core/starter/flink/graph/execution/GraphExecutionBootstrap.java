@@ -34,6 +34,7 @@ import org.apache.seatunnel.core.starter.flink.graph.resolve.InputDependencyReso
 import org.apache.seatunnel.core.starter.flink.graph.resolve.ResolvedGraph;
 import org.apache.seatunnel.core.starter.flink.graph.resolve.ResolvedNode;
 import org.apache.seatunnel.core.starter.flink.graph.runtime.GraphNodeExecutor;
+import org.apache.seatunnel.core.starter.flink.graph.spi.GraphNodeProviderDiscovery;
 import org.apache.seatunnel.core.starter.flink.graph.validate.GraphValidator;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -103,6 +104,8 @@ public final class GraphExecutionBootstrap {
                 "check",
                 actionFactory(),
                 new JdbcActionExecutor());
+        new GraphNodeProviderDiscovery()
+                .load(Thread.currentThread().getContextClassLoader(), factoryMap, executorMap);
         this.factories = Collections.unmodifiableMap(factoryMap);
         this.executors = Collections.unmodifiableMap(executorMap);
     }
@@ -156,7 +159,8 @@ public final class GraphExecutionBootstrap {
                 plugin,
                 "read",
                 NodeCapability.builder()
-                        .inputCount(0, 0)
+                        .inputCount(0, Integer.MAX_VALUE)
+                        .acceptsInput(NodeCapability.ValueKind.CONTROL)
                         .produces(NodeCapability.ValueKind.DATA)
                         .supportsBatch(true)
                         .build()) {

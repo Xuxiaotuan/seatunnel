@@ -105,6 +105,19 @@ class InputDependencyResolverTest {
         Assertions.assertEquals(first, second);
     }
 
+    @Test
+    void rejectsDuplicateListInputs() {
+        Map<String, GraphNodeDefinition> nodes = new LinkedHashMap<>();
+        nodes.put("source", node("source", Collections.emptyList()));
+        nodes.put("join", node("join", Arrays.asList("source", "source")));
+
+        GraphValidationException error =
+                Assertions.assertThrows(
+                        GraphValidationException.class, () -> resolver.resolve(job(nodes)));
+
+        Assertions.assertTrue(error.getMessage().contains("duplicate input"));
+    }
+
     private static List<String> ids(List<ResolvedNode> nodes) {
         java.util.ArrayList<String> result = new java.util.ArrayList<>();
         for (ResolvedNode node : nodes) {

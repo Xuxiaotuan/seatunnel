@@ -35,4 +35,8 @@ The current validation set is `FakeSource`, `Jdbc`, `Python`, `sql`, `Console`, 
 
 Execution order comes from the graph, not YAML order. A root control action with no inputs runs before Flink submission; a terminal action consuming completion values runs after the Flink job finishes. Sources, transforms, SQL, and sinks remain data graph nodes, while control actions do not become fake data streams.
 
+A preparation action can connect to a source through `inputs`, and a reconciliation action can consume a sink completion through `inputs`. A failed preparation action prevents submission; a failed data job skips post actions; a failed post action fails the overall task. Actions are task-level client orchestration steps, not per-record or per-subtask operators, and are not part of a checkpoint or sink transaction boundary.
+
+Flink 1.20 graph-node extensions use the `GraphNodeProvider` ServiceLoader interface. Each provider declares a unique `plugin + operation`, capability metadata, and an executor. Duplicate overrides of built-in nodes fail before execution.
+
 Local verification uses `/Users/xujiawei/software/flink/flink-1.20.5`; Python transforms also require the explicit security enablement and interpreter allowlist. Tests cover YAML parsing, variable substitution, dependency resolution, cycle detection, capability validation, Python/SQL node contracts, and one shared Flink job submission. A real PostgreSQL run still needs the PostgreSQL JDBC driver and connector packages in the target deployment; the example passes `${PG_PASSWORD}` at runtime and stores no password in the repository.

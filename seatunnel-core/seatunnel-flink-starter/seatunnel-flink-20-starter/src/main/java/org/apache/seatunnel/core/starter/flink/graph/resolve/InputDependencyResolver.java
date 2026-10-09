@@ -24,9 +24,11 @@ import org.apache.seatunnel.core.starter.flink.graph.validate.GraphValidationExc
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Converts user-facing input references into a navigable dependency graph. */
 public final class InputDependencyResolver {
@@ -47,7 +49,15 @@ public final class InputDependencyResolver {
         }
 
         for (ResolvedNode node : resolved.values()) {
+            Set<String> aliases = new HashSet<>();
             for (InputBinding binding : node.inputBindings()) {
+                if (!aliases.add(binding.alias())) {
+                    throw new GraphValidationException(
+                            "Node "
+                                    + node.id()
+                                    + " has a duplicate input alias "
+                                    + binding.alias());
+                }
                 ResolvedNode upstream = resolved.get(binding.upstreamNodeId());
                 if (upstream == null) {
                     throw new GraphValidationException(

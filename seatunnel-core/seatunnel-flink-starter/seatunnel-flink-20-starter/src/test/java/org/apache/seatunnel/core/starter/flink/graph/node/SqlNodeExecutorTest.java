@@ -108,6 +108,44 @@ class SqlNodeExecutorTest {
         Assertions.assertEquals("Alice", rows.get(0).getField(1));
     }
 
+    @Test
+    void reportsSqlNodeIdWhenQueryPlanningFails() {
+        StreamExecutionEnvironment environment =
+                StreamExecutionEnvironment.getExecutionEnvironment();
+        StreamTableEnvironment tableEnvironment =
+                StreamTableEnvironment.create(environment, EnvironmentSettings.inBatchMode());
+        DataRuntimeValue orders =
+                data(
+                        environment,
+                        "orders",
+                        new SeaTunnelRowType(
+                                new String[] {"order_id"},
+                                new SeaTunnelDataType<?>[] {BasicType.INT_TYPE}),
+                        new SeaTunnelRow(new Object[] {1}));
+        GraphNodeDefinition definition =
+                new GraphNodeDefinition(
+                        "broken_sql",
+                        "sql",
+                        "query",
+                        Collections.singletonList("orders"),
+                        Collections.singletonMap("query", "SELECT * FROM missing_table"));
+
+        IllegalArgumentException error =
+                Assertions.assertThrows(
+                        IllegalArgumentException.class,
+                        () ->
+                                new SqlNodeExecutor()
+                                        .execute(
+                                                new NodeExecutionContext(
+                                                        new ResolvedNode(definition),
+                                                        environment,
+                                                        tableEnvironment,
+                                                        Collections.emptyMap()),
+                                                Collections.singletonMap("orders", orders)));
+
+        Assertions.assertTrue(error.getMessage().contains("broken_sql"));
+    }
+
     private static DataRuntimeValue data(
             StreamExecutionEnvironment environment,
             String name,
