@@ -20,6 +20,7 @@ package org.apache.seatunnel.core.starter.flink.graph.node;
 import org.apache.seatunnel.core.starter.flink.graph.api.GraphNodeDefinition;
 import org.apache.seatunnel.core.starter.flink.graph.resolve.ResolvedNode;
 import org.apache.seatunnel.core.starter.flink.graph.runtime.CompletionRuntimeValue;
+import org.apache.seatunnel.core.starter.flink.graph.runtime.ControlRuntimeValue;
 import org.apache.seatunnel.core.starter.flink.graph.runtime.NodeExecutionContext;
 
 import org.junit.jupiter.api.Assertions;
@@ -90,6 +91,73 @@ class ActionNodeExecutorTest {
                         () -> new JdbcActionExecutor().execute(context(node), inputs));
 
         Assertions.assertTrue(error.getMessage().contains("config.url"));
+    }
+
+    @Test
+    void acceptsMultipleCompletionInputsForReconciliation() {
+        GraphNodeDefinition definition =
+                new GraphNodeDefinition(
+                        "recon",
+                        "jdbc_action",
+                        "check",
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+        ResolvedNode node = new ResolvedNode(definition);
+        Map<String, org.apache.seatunnel.core.starter.flink.graph.runtime.GraphRuntimeValue>
+                inputs = new LinkedHashMap<>();
+        inputs.put("orders_sink", new CompletionRuntimeValue("orders_sink"));
+        inputs.put("customers_sink", new CompletionRuntimeValue("customers_sink"));
+
+        IllegalArgumentException error =
+                Assertions.assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new JdbcActionExecutor().execute(context(node), inputs));
+
+        Assertions.assertTrue(error.getMessage().contains("config.url"));
+    }
+
+    @Test
+    void acceptsControlInputForChainedPreparationAction() {
+        GraphNodeDefinition definition =
+                new GraphNodeDefinition(
+                        "prepare_second",
+                        "jdbc_action",
+                        "check",
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+        ResolvedNode node = new ResolvedNode(definition);
+        Map<String, org.apache.seatunnel.core.starter.flink.graph.runtime.GraphRuntimeValue>
+                inputs = Collections.singletonMap("prepare", new ControlRuntimeValue("prepare"));
+
+        IllegalArgumentException error =
+                Assertions.assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new JdbcActionExecutor().execute(context(node), inputs));
+
+        Assertions.assertTrue(error.getMessage().contains("config.url"));
+    }
+
+    @Test
+    void rejectsMixedControlAndCompletionInputs() {
+        GraphNodeDefinition definition =
+                new GraphNodeDefinition(
+                        "recon",
+                        "jdbc_action",
+                        "check",
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+        ResolvedNode node = new ResolvedNode(definition);
+        Map<String, org.apache.seatunnel.core.starter.flink.graph.runtime.GraphRuntimeValue>
+                inputs = new LinkedHashMap<>();
+        inputs.put("prepare", new ControlRuntimeValue("prepare"));
+        inputs.put("sink", new CompletionRuntimeValue("sink"));
+
+        IllegalArgumentException error =
+                Assertions.assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new JdbcActionExecutor().execute(context(node), inputs));
+
+        Assertions.assertTrue(error.getMessage().contains("same lifecycle phase"));
     }
 
     private static NodeExecutionContext context(ResolvedNode node) {

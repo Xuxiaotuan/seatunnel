@@ -30,12 +30,18 @@ public final class NodeCapability {
         COMPLETION
     }
 
+    public enum ExecutionScope {
+        FLINK_DATA,
+        CLIENT_CONTROL
+    }
+
     private final Set<ValueKind> acceptedInputKinds;
     private final Set<ValueKind> outputKinds;
     private final int minimumInputCount;
     private final int maximumInputCount;
     private final boolean supportsBatch;
     private final boolean producesCompletion;
+    private final ExecutionScope executionScope;
 
     private NodeCapability(Builder builder) {
         this.acceptedInputKinds = immutableSet(builder.acceptedInputKinds);
@@ -48,6 +54,7 @@ public final class NodeCapability {
         this.maximumInputCount = builder.maximumInputCount;
         this.supportsBatch = builder.supportsBatch;
         this.producesCompletion = builder.producesCompletion;
+        this.executionScope = builder.executionScope;
     }
 
     public Set<ValueKind> acceptedInputKinds() {
@@ -74,6 +81,10 @@ public final class NodeCapability {
         return producesCompletion;
     }
 
+    public ExecutionScope executionScope() {
+        return executionScope;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -91,6 +102,7 @@ public final class NodeCapability {
         private int maximumInputCount = Integer.MAX_VALUE;
         private boolean supportsBatch;
         private boolean producesCompletion;
+        private ExecutionScope executionScope = ExecutionScope.FLINK_DATA;
 
         public Builder acceptsInput(ValueKind kind) {
             acceptedInputKinds.add(kind);
@@ -115,6 +127,14 @@ public final class NodeCapability {
 
         public Builder producesCompletion(boolean value) {
             producesCompletion = value;
+            return this;
+        }
+
+        public Builder executionScope(ExecutionScope value) {
+            if (value == null) {
+                throw new IllegalArgumentException("execution scope must not be null");
+            }
+            executionScope = value;
             return this;
         }
 

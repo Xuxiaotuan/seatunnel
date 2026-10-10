@@ -29,6 +29,7 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.Map;
+import java.util.Objects;
 
 /** Executes a bounded JDBC readiness or reconciliation action without logging credentials. */
 public final class JdbcActionExecutor implements GraphNodeExecutor {
@@ -38,15 +39,28 @@ public final class JdbcActionExecutor implements GraphNodeExecutor {
             NodeExecutionContext context, Map<String, GraphRuntimeValue> inputValues)
             throws Exception {
         ResolvedNode node = context.node();
-        if (inputValues.size() > 1) {
-            throw new IllegalArgumentException(
-                    "JDBC action " + node.id() + " accepts at most one completion input");
-        }
+        org.apache.seatunnel.core.starter.flink.graph.api.NodeCapability.ValueKind inputKind = null;
         for (GraphRuntimeValue input : inputValues.values()) {
-            if (!(input instanceof CompletionRuntimeValue)) {
+            org.apache.seatunnel.core.starter.flink.graph.api.NodeCapability.ValueKind currentKind;
+            if (input instanceof CompletionRuntimeValue) {
+                currentKind =
+                        org.apache.seatunnel.core.starter.flink.graph.api.NodeCapability.ValueKind
+                                .COMPLETION;
+            } else if (input instanceof ControlRuntimeValue) {
+                currentKind =
+                        org.apache.seatunnel.core.starter.flink.graph.api.NodeCapability.ValueKind
+                                .CONTROL;
+            } else {
                 throw new IllegalArgumentException(
-                        "JDBC action " + node.id() + " only accepts a completion input");
+                        "JDBC action " + node.id() + " only accepts control or completion inputs");
             }
+            if (inputKind != null && !Objects.equals(inputKind, currentKind)) {
+                throw new IllegalArgumentException(
+                        "JDBC action "
+                                + node.id()
+                                + " requires inputs from the same lifecycle phase");
+            }
+            inputKind = currentKind;
         }
         String url = required(node, "url");
         String query = required(node, "query");

@@ -107,6 +107,61 @@ class GraphValidatorTest {
     }
 
     @Test
+    void acceptsMultipleCompletionDependenciesForTerminalAction() {
+        Map<String, GraphNodeDefinition> nodes = new LinkedHashMap<>();
+        nodes.put("orders_sink", node("orders_sink", Collections.emptyList(), "sink"));
+        nodes.put("customers_sink", node("customers_sink", Collections.emptyList(), "sink"));
+        nodes.put(
+                "recon",
+                node("recon", java.util.Arrays.asList("orders_sink", "customers_sink"), "action"));
+        ResolvedGraph graph = resolver.resolve(job(nodes));
+
+        Assertions.assertDoesNotThrow(
+                () ->
+                        validator.validate(
+                                graph,
+                                factories(completionSinkFactory(), completionActionFactory())));
+    }
+
+    @Test
+    void acceptsControlActionChainBeforeSource() {
+        Map<String, GraphNodeDefinition> nodes = new LinkedHashMap<>();
+        nodes.put("prepare", node("prepare", Collections.emptyList(), "action"));
+        nodes.put(
+                "prepare_second",
+                node("prepare_second", Collections.singletonList("prepare"), "action"));
+        nodes.put("source", node("source", Collections.singletonList("prepare_second"), "source"));
+        ResolvedGraph graph = resolver.resolve(job(nodes));
+
+        Assertions.assertDoesNotThrow(
+                () ->
+                        validator.validate(
+                                graph, factories(controlFactory(), controlSourceFactory())));
+    }
+
+    @Test
+    void rejectsCompletionActionWithDownstreamNode() {
+        Map<String, GraphNodeDefinition> nodes = new LinkedHashMap<>();
+        nodes.put("sink", node("sink", Collections.emptyList(), "sink"));
+        nodes.put("recon", node("recon", Collections.singletonList("sink"), "action"));
+        nodes.put("follow_up", node("follow_up", Collections.singletonList("recon"), "source"));
+        ResolvedGraph graph = resolver.resolve(job(nodes));
+
+        GraphValidationException error =
+                Assertions.assertThrows(
+                        GraphValidationException.class,
+                        () ->
+                                validator.validate(
+                                        graph,
+                                        factories(
+                                                completionSinkFactory(),
+                                                completionActionFactory(),
+                                                controlSourceFactory())));
+
+        Assertions.assertTrue(error.getMessage().contains("terminal"));
+    }
+
+    @Test
     void rejectsMismatchedNodeMapIdentity() {
         Map<String, GraphNodeDefinition> nodes = new LinkedHashMap<>();
         nodes.put("map_key", node("actual_id", Collections.emptyList(), "source"));
@@ -176,6 +231,7 @@ class GraphValidatorTest {
                 NodeCapability.builder()
                         .inputCount(0, 0)
                         .produces(NodeCapability.ValueKind.CONTROL)
+                        .executionScope(NodeCapability.ExecutionScope.CLIENT_CONTROL)
                         .supportsBatch(true)
                         .build());
     }
@@ -184,8 +240,10 @@ class GraphValidatorTest {
         return factory(
                 "action",
                 NodeCapability.builder()
-                        .inputCount(0, 0)
+                        .inputCount(0, Integer.MAX_VALUE)
+                        .acceptsInput(NodeCapability.ValueKind.CONTROL)
                         .produces(NodeCapability.ValueKind.CONTROL)
+                        .executionScope(NodeCapability.ExecutionScope.CLIENT_CONTROL)
                         .supportsBatch(true)
                         .build());
     }
@@ -216,9 +274,11 @@ class GraphValidatorTest {
         return factory(
                 "action",
                 NodeCapability.builder()
-                        .inputCount(1, 1)
+                        .inputCount(0, Integer.MAX_VALUE)
+                        .acceptsInput(NodeCapability.ValueKind.CONTROL)
                         .acceptsInput(NodeCapability.ValueKind.COMPLETION)
                         .produces(NodeCapability.ValueKind.CONTROL)
+                        .executionScope(NodeCapability.ExecutionScope.CLIENT_CONTROL)
                         .supportsBatch(true)
                         .build());
     }

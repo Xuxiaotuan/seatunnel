@@ -211,9 +211,11 @@ public final class GraphExecutionBootstrap {
                 "jdbc_action",
                 "check",
                 NodeCapability.builder()
-                        .inputCount(0, 1)
+                        .inputCount(0, Integer.MAX_VALUE)
+                        .acceptsInput(NodeCapability.ValueKind.CONTROL)
                         .acceptsInput(NodeCapability.ValueKind.COMPLETION)
                         .produces(NodeCapability.ValueKind.CONTROL)
+                        .executionScope(NodeCapability.ExecutionScope.CLIENT_CONTROL)
                         .supportsBatch(true)
                         .build()) {
             @Override

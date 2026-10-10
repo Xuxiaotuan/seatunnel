@@ -70,10 +70,10 @@ public final class SqlNodeExecutor implements GraphNodeExecutor {
         }
         DataStream<Row> rows;
         try {
-            rows = TableUtil.tableToDataStream(tableEnvironment, result);
+            rows = TableUtil.tableToInsertOnlyDataStream(tableEnvironment, result);
         } catch (RuntimeException error) {
             throw new IllegalArgumentException(
-                    "SQL node " + node.id() + " failed to materialize query output", error);
+                    "SQL node " + node.id() + " requires an insert-only query output", error);
         }
         DataStream<org.apache.seatunnel.api.table.type.SeaTunnelRow> output =
                 rows.map(new ChangelogRowMapper(node.id()))

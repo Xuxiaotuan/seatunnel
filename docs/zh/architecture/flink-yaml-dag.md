@@ -41,6 +41,8 @@ nodes:
 
 前置动作可以通过 `inputs` 连接到 Source，后置校验可以通过 `inputs` 消费 Sink 的完成值。前置动作失败时不会提交 Flink 作业；数据作业失败时不会执行后置动作；后置动作失败会使整个任务失败。动作节点是任务级客户端编排动作，不是每条数据或每个 Flink subtask 的算子，也不与 checkpoint 或 Sink 事务绑定。
 
+当前版本把完成边限制为 `COMPLETION ->` 终端客户端控制节点。一个 recon 节点可以同时消费多个 sink 的完成值；控制值和完成值不能混用。完成节点后面不能再连接新的数据节点，因为 Flink 作业已经在完成边生效前提交并结束。
+
 节点扩展使用 Flink 1.20 starter 的 `GraphNodeProvider` ServiceLoader 接口。节点提供者必须声明唯一的 `plugin + operation`、输入输出能力和执行器；重复覆盖内置节点会在启动前失败。
 
 本地验证使用 `/Users/xujiawei/software/flink/flink-1.20.5`，Python transform 还需要显式开启安全策略并配置解释器 allowlist。当前测试已经覆盖 YAML 解析、变量替换、依赖解析、环检测、能力校验、Python/SQL 节点契约和一次共享 Flink job submission。真实 PostgreSQL 运行还需要在目标部署中提供 PostgreSQL JDBC 驱动和对应 Connector 包；示例中的密码通过 `${PG_PASSWORD}` 传入，不写入仓库。

@@ -39,6 +39,14 @@ public class GraphNodeProviderDiscoveryTest {
 
         Assertions.assertTrue(factories.containsKey("test_provider:map"));
         Assertions.assertNotNull(executors.get("test_provider:map"));
+        NodeCapability capability = factories.get("test_provider:map").capability();
+        Assertions.assertEquals(
+                NodeCapability.ExecutionScope.CLIENT_CONTROL, capability.executionScope());
+        Assertions.assertEquals(
+                java.util.Set.of(NodeCapability.ValueKind.CONTROL),
+                capability.acceptedInputKinds());
+        Assertions.assertEquals(
+                java.util.Set.of(NodeCapability.ValueKind.CONTROL), capability.outputKinds());
     }
 
     @Test
@@ -73,8 +81,10 @@ public class GraphNodeProviderDiscoveryTest {
                 @Override
                 public NodeCapability capability() {
                     return NodeCapability.builder()
-                            .inputCount(0, 0)
-                            .produces(NodeCapability.ValueKind.DATA)
+                            .inputCount(0, Integer.MAX_VALUE)
+                            .acceptsInput(NodeCapability.ValueKind.CONTROL)
+                            .produces(NodeCapability.ValueKind.CONTROL)
+                            .executionScope(NodeCapability.ExecutionScope.CLIENT_CONTROL)
                             .supportsBatch(true)
                             .build();
                 }

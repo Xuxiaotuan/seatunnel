@@ -39,6 +39,14 @@ public final class TableUtil {
         return dataStream;
     }
 
+    public static DataStream<Row> tableToInsertOnlyDataStream(
+            StreamTableEnvironment tableEnvironment, Table table) {
+        TypeInformation<Row> typeInfo = table.getSchema().toRowType();
+        DataStream<Row> dataStream = tableEnvironment.toDataStream(table);
+        dataStream.getTransformation().setOutputType(typeInfo);
+        return dataStream;
+    }
+
     public static boolean tableExists(TableEnvironment tableEnvironment, String name) {
         return Arrays.asList(tableEnvironment.listTables()).contains(name);
     }

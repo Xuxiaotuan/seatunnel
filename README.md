@@ -70,7 +70,9 @@ and one sink. The PostgreSQL variant keeps connection values as runtime
 variables in [`examples/flink/graph/postgres-python-jdbc.yaml`](examples/flink/graph/postgres-python-jdbc.yaml).
 The lifecycle variant adds task-level JDBC preparation and reconciliation nodes in [`examples/flink/graph/postgres-python-jdbc-recon.yaml`](examples/flink/graph/postgres-python-jdbc-recon.yaml).
 
-`inputs` expresses both data and lifecycle dependencies. A control action such as `prepare` runs before Flink submission; a node consuming a sink completion such as `recon` runs after the Flink job succeeds. These actions run once in the client orchestration layer. They are not per-record operators and are not part of the Flink checkpoint or sink transaction boundary.
+`inputs` expresses both data and lifecycle dependencies. A control action such as `prepare` runs before Flink submission; a node consuming a sink completion such as `recon` runs after the Flink job succeeds. These actions run once in the client orchestration layer. They are not per-record operators and are not part of the Flink checkpoint or sink transaction boundary. Completion edges are terminal client-control edges in this slice: one reconciliation action may consume multiple sink completions, while control and completion inputs cannot be mixed.
+
+SQL nodes use Flink's insert-only `toDataStream` conversion. This keeps the graph contract explicit: bounded SQL that produces an update changelog is rejected by the runtime bridge instead of being silently treated as an append stream.
 
 The current runner targets Flink 1.20.x (validated locally with Flink 1.20.5):
 
@@ -94,7 +96,7 @@ contracts, the local Flink SQL bridge, and one shared-job submission. A real
 PostgreSQL run still requires the connector and JDBC driver packages to be
 assembled for the target deployment.
 
-Verified locally: the focused graph suite passes 31 tests, the selected Flink
+Verified locally: the focused graph suite passes 34 tests, the selected Flink
 starter packages successfully against Flink 1.20.5 dependencies, and the Fake
 → Python → SQL → Console example exits with code 0 when Python security is
 explicitly enabled. The supplied PostgreSQL endpoint accepts TCP connections;

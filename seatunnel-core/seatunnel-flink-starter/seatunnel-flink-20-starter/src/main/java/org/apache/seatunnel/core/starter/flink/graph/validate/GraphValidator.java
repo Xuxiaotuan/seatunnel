@@ -22,7 +22,9 @@ import org.apache.seatunnel.core.starter.flink.graph.api.NodeCapability;
 import org.apache.seatunnel.core.starter.flink.graph.resolve.ResolvedGraph;
 import org.apache.seatunnel.core.starter.flink.graph.resolve.ResolvedNode;
 
+import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
 
 /** Validates plugin capabilities and value-kind compatibility before execution. */
 public final class GraphValidator {
@@ -55,6 +57,7 @@ public final class GraphValidator {
                                 + node.definition().plugin());
             }
             NodeCapability capability = factory.capability();
+            validateExecutionScope(graph, node, capability, factories);
             int inputCount = node.inputBindings().size();
             if (inputCount < capability.minimumInputCount()
                     || inputCount > capability.maximumInputCount()) {
@@ -92,6 +95,53 @@ public final class GraphValidator {
                                     + " output of node "
                                     + upstream.id());
                 }
+            }
+        }
+    }
+
+    private static void validateExecutionScope(
+            ResolvedGraph graph,
+            ResolvedNode node,
+            NodeCapability capability,
+            Map<String, GraphNodeFactory> factories) {
+        if (capability.executionScope() == NodeCapability.ExecutionScope.CLIENT_CONTROL) {
+            if (capability.acceptedInputKinds().contains(NodeCapability.ValueKind.DATA)) {
+                throw new GraphValidationException(
+                        "Client-control node " + node.id() + " cannot consume data values");
+            }
+            if (!Collections.singleton(NodeCapability.ValueKind.CONTROL)
+                    .equals(capability.outputKinds())) {
+                throw new GraphValidationException(
+                        "Client-control node " + node.id() + " must produce only control values");
+            }
+        } else if (capability.acceptedInputKinds().contains(NodeCapability.ValueKind.COMPLETION)) {
+            throw new GraphValidationException(
+                    "Flink data node " + node.id() + " cannot consume completion values");
+        }
+
+        boolean hasControlDependency = false;
+        boolean hasCompletionDependency = false;
+        for (org.apache.seatunnel.core.starter.flink.graph.api.InputBinding binding :
+                node.inputBindings()) {
+            Set<NodeCapability.ValueKind> upstreamKinds =
+                    outputKinds(graph.node(binding.upstreamNodeId()), factories);
+            hasControlDependency |= upstreamKinds.contains(NodeCapability.ValueKind.CONTROL);
+            hasCompletionDependency |= upstreamKinds.contains(NodeCapability.ValueKind.COMPLETION);
+        }
+        if (hasControlDependency && hasCompletionDependency) {
+            throw new GraphValidationException(
+                    "Node " + node.id() + " cannot mix control and completion dependencies");
+        }
+        if (hasCompletionDependency) {
+            if (capability.executionScope() != NodeCapability.ExecutionScope.CLIENT_CONTROL) {
+                throw new GraphValidationException(
+                        "Completion dependency "
+                                + node.id()
+                                + " must be handled by a client-control node");
+            }
+            if (!node.downstreamNodeIds().isEmpty()) {
+                throw new GraphValidationException(
+                        "Completion action " + node.id() + " must be terminal");
             }
         }
     }
